@@ -27,28 +27,30 @@ from dot_calibration import DotCalibration
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# cal_blob threshold applies to the [0,1]-normalised image (see
+# DotCalibration._normalize_for_log), so one value fits PNG and EXR alike.
 CAMERAS = {
     "OnSemi": dict(
         sl_cal=ROOT / "Simulation_Pictures/PBRT/SL_ToF_On/SL_OnSemi",
         tof_cal=ROOT / "Simulation_Pictures/PBRT/SL_ToF_On/ToF_OnSemi",
         K=np.array([[1006.2, 0.0, 640.0], [0.0, -1006.2, 480.0], [0.0, 0.0, 1.0]]),
-        cal_blob=dict(max_sigma=18, num_sigma=10, min_sigma=12, threshold=0.006),
+        cal_blob=dict(max_sigma=18, num_sigma=10, min_sigma=12, threshold=0.05),
     ),
     "Schmersal": dict(
         sl_cal=ROOT / "Simulation_Pictures/PBRT/SL_ToF_Schm/SL_Schmersal",
         tof_cal=ROOT / "Simulation_Pictures/PBRT/SL_ToF_Schm/ToF_Schmersal",
         K=np.array([[503.1, 0.0, 320.0], [0.0, -503.1, 240.0], [0.0, 0.0, 1.0]]),
-        cal_blob=dict(max_sigma=14, num_sigma=10, min_sigma=8, threshold=0.0006),
+        cal_blob=dict(max_sigma=14, num_sigma=10, min_sigma=8, threshold=0.05),
     ),
-    # Real-sensor recordings (PNG SL images, binary PCDs). Farthest distances
+    # Real-sensor recordings (EXR SL images, binary PCDs). Farthest distances
     # lose dots (dim/small) — the FOV-aware tracking + min-track invalidation
     # handle the partial detections.
     "SchmersalReal": dict(
-        sl_cal=ROOT / "Pictures/Calibration/Schmersal/SL",
-        tof_cal=ROOT / "Pictures/Calibration/Schmersal/ToF",
+        sl_cal=ROOT / "Pictures/Calibration/SchmersalReal/19.06/SL",
+        tof_cal=ROOT / "Pictures/Calibration/SchmersalReal/19.06/ToF",
         K=np.array([[503.1, 0.0, 320.0], [0.0, -503.1, 240.0], [0.0, 0.0, 1.0]]),
-        cal_blob=dict(max_sigma=10, num_sigma=8, min_sigma=10, threshold=0.02),
-    ),
+        cal_blob=dict(max_sigma=10, num_sigma=10, min_sigma=10, threshold=0.05),
+    ),    
 }
 
 

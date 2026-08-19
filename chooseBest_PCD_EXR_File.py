@@ -46,7 +46,7 @@ REF_NAME = "Nr0.exr"
 K = np.array([[503.1, 0.0, 320.0],
               [0.0, -503.1, 240.0],
               [0.0, 0.0, 1.0]])
-CAL_BLOB = dict(max_sigma=10, num_sigma=8, min_sigma=10, threshold=0.02)
+CAL_BLOB = dict(max_sigma=10, num_sigma=8, min_sigma=10, threshold=0.05)
 PCD_UNIT_SCALE = 0.001          # mm -> m
 MISSING_PENALTY = 1.0           # lambda: added per fraction of dots missing in a frame
 _EPS = 1e-6                     # floor for MAD, in metres

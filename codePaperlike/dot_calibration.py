@@ -6,6 +6,7 @@ import cv2
 import OpenEXR
 import Imath
 from skimage import feature
+from skimage.util import img_as_float
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
 from scipy.optimize import least_squares
@@ -38,14 +39,27 @@ class DotCalibration:
 
         Handles formats like:  SL_0.4m.exr, SL_ToF_1.2m.pcd, 3_6m_frame.png
         """
-        m = re.search(r"([0-9]+(?:[.,_][0-9]+)?)m", os.path.basename(filename), re.IGNORECASE)
-        if not m:
-            return None
-        s = m.group(1).replace("_", ".").replace(",", ".")
-        try:
-            return float(s)
-        except ValueError:
-            return None
+
+        if 'Pos' not in filename:
+            m = re.search(r"([0-9]+(?:[.,_][0-9]+)?)m", os.path.basename(filename), re.IGNORECASE)
+            if not m:
+                return None
+            s = m.group(1).replace("_", ".").replace(",", ".")
+            try:
+                return float(s)
+            except ValueError:
+                return None
+        else:
+            posName = filename[:-4]
+            if len(posName) > 4:
+                posName = posName[-4:]
+            offset = 0
+            GROUND_TRUTH = {
+                "Pos0": 460-offset, "Pos1": 510-offset, "Pos2": 572-offset, "Pos3": 651-offset, "Pos4": 755-offset,
+                "Pos5": 899-offset, "Pos6": 1111-offset, "Pos7": 1454-offset, "Pos8": 2103-offset, "Pos9": 3800-offset,}  
+            return f'{float(GROUND_TRUTH[posName])/1000:.2f}'
+            
+
 
     def load_images(self, folder_path: str, pattern: str = "_image_rendered.png") -> List[str]:
         """Return sorted list of image paths matching *pattern* inside *folder_path*."""
@@ -302,10 +316,31 @@ class DotCalibration:
             out[y0:y1, x0:x1] += peak * gauss
         return out
 
+    @staticmethod
+    def _normalize_for_log(image: np.ndarray) -> np.ndarray:
+        """Map an image to [0, 1] so blob_log's absolute *threshold* is scale-free.
+
+        blob_log thresholds the scale-normalised LoG response, whose magnitude is
+        proportional to the pixel amplitude.  skimage's img_as_float rescales
+        integer input (uint8 -> [0, 1]) but is a no-op for float, so raw EXR
+        radiance (real sensor: ~150...3900 counts; PBRT renders: ~0...2.7) would
+        need a different threshold for every dataset.
+
+        Percentiles rather than min/max: the 1 % floor removes the ambient
+        pedestal the real recordings sit on, the 99.9 % ceiling keeps a single hot
+        pixel from compressing every dot into the bottom of the range.
+        """
+        det = img_as_float(image).astype(np.float32)
+        lo, hi = np.percentile(det, 1.0), np.percentile(det, 99.9)
+        return np.clip((det - lo) / max(float(hi - lo), 1e-12), 0.0, 1.0)
+
     def detect_blobs(self, image_path: str, max_sigma: int = 30, num_sigma: int = 10, min_sigma: int = 5,
-                     threshold: float = 0.1, visualize: bool = False, add_synthetic_gaussian: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+                     threshold: float = 0.05, visualize: bool = False, add_synthetic_gaussian: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """
         Laplacian-of-Gaussian blob detector (scikit-image).
+
+        *threshold* applies to the robustly normalised image (see _normalize_for_log),
+        so the same value holds for 8-bit PNG, simulated EXR and real-sensor EXR.
 
         Returns
         -------
@@ -316,7 +351,8 @@ class DotCalibration:
         if image is None or image.size == 0:
             raise ValueError(f"Invalid image for LoG blob detection: {image_path}")
 
-        blobs = feature.blob_log(image, max_sigma=max_sigma, num_sigma=num_sigma, min_sigma=min_sigma, threshold=threshold)
+        detect_img = self._normalize_for_log(image)
+        blobs = feature.blob_log(detect_img, max_sigma=max_sigma, num_sigma=num_sigma, min_sigma=min_sigma, threshold=threshold)
         blobs[:, 2] = blobs[:, 2] * (2 ** 0.5)  # convert sigma to radius
         if add_synthetic_gaussian:
             image_out = self.add_gaussian_to_detected_blob(image, blobs)
@@ -325,7 +361,8 @@ class DotCalibration:
 
         if visualize:
             fig, ax = plt.subplots()
-            ax.imshow(image_out, cmap="gray")
+            # raw EXR radiance renders black under imshow's default scaling
+            ax.imshow(image_out if add_synthetic_gaussian else detect_img, cmap="gray")
             for y, x, r in blobs:
                 ax.add_patch(plt.Circle((x, y), r, color="red", linewidth=1, fill=False))
             plt.show()
