@@ -38,15 +38,15 @@ sys.path.append(str(ROOT / "codePaperlike"))
 from dot_calibration import DotCalibration, ToFSampler  # noqa: E402
 
 # ── Defaults (match calibrate.py's SchmersalReal 640x480 config) ──────────────
-SRC_EXR = ROOT / "SL_Exr"
-SRC_PCD = Path(r"C:\Users\Julian\Documents\Calibrations\iToF_SL_10x10\ToF_PCD_10x10")
-OUT = ROOT / "SL_iToF_Pairs"
+SRC_EXR = ROOT / "SL_EXR_COH"
+SRC_PCD = Path(r"C:\Users\Julian\Documents\Calibrations\iToF_SL_33x33\ToF_PCD")
+OUT = ROOT / "SL_iToF_Pairs_Coherent"
 REF_NAME = "Nr0.exr"
 
 K = np.array([[503.1, 0.0, 320.0],
               [0.0, -503.1, 240.0],
               [0.0, 0.0, 1.0]])
-CAL_BLOB = dict(max_sigma=10, num_sigma=8, min_sigma=10, threshold=0.05)
+CAL_BLOB = dict(max_sigma=4, num_sigma=4, min_sigma=4, threshold=0.05)
 PCD_UNIT_SCALE = 0.001          # mm -> m
 MISSING_PENALTY = 1.0           # lambda: added per fraction of dots missing in a frame
 _EPS = 1e-6                     # floor for MAD, in metres
@@ -211,7 +211,7 @@ def main():
                     help="override blob-detection LoG threshold")
     ap.add_argument("--pos", nargs="*", default=None,
                     help="subset of positions, e.g. --pos Pos0 Pos3")
-    ap.add_argument("--plots", action="store_true",
+    ap.add_argument("--plots", action="store_true",default=True,
                     help="save per-position diagnostic figures")
     args = ap.parse_args()
 

@@ -50,7 +50,14 @@ CAMERAS = {
         tof_cal=ROOT / "Pictures/Calibration/SchmersalReal/19.06/ToF",
         K=np.array([[503.1, 0.0, 320.0], [0.0, -503.1, 240.0], [0.0, 0.0, 1.0]]),
         cal_blob=dict(max_sigma=10, num_sigma=10, min_sigma=10, threshold=0.05),
-    ),    
+    ), 
+        "SchmersalRealCoherent": dict(
+        sl_cal=ROOT / "Pictures/Calibration/SchmersalReal/19.06/Coherent/SL",
+        tof_cal=ROOT / "Pictures/Calibration/SchmersalReal/19.06/Coherent/ToF",
+        K=np.array([[503.1, 0.0, 320.0], [0.0, -503.1, 240.0], [0.0, 0.0, 1.0]]),
+        cal_blob=dict(max_sigma=4, num_sigma=4, min_sigma=4, threshold=0.03),
+    ), 
+
 }
 
 
