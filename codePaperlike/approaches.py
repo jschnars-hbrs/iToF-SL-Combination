@@ -21,7 +21,6 @@ import argparse
 import csv
 import json
 import os
-import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -87,14 +86,13 @@ SIGMA_FLOOR = 1e-4           # m — avoids zero variances on noise-free sims
 def _parse_gt_distance(sl_path):
     """Extract ground-truth distance in meters from the SL filename.
 
-    Looks for a pattern like '_1.0m_' or '_0.75m_' or '_4.0m.' in the filename.
+    Looks for a pattern like '1.0m', '_0.75m_' or '_4.0m.' in the filename, and
+    resolves Pos0…Pos9 via the logbook table.
     Returns the distance as float, or None if not found.
     """
-    stem = Path(sl_path).stem  # e.g. "SL_Flat_Wall_1.0m_On"
-    m = re.search(r"_(\d+\.?\d*)m(?:_|$)", stem)
-    if m:
-        return float(m.group(1))
-    return None
+    # Same rules as the calibration loader, so bare names like "1.00m.exr"
+    # parse as well as "SL_Flat_Wall_1.0m_On.png".
+    return DotCalibration.parse_distance_from_name(sl_path)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

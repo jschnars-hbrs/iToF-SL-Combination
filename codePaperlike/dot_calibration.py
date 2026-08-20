@@ -14,6 +14,7 @@ from scipy.spatial import cKDTree
 import matplotlib.pyplot as plt
 import pandas as pd
 from typing import Optional, Tuple, List, Dict
+from pathlib import Path
 
 
 class DotCalibration:
@@ -28,38 +29,44 @@ class DotCalibration:
 
     SL_CHANNEL = "S0.940,000nm"  # EXR channel to use for structured-light images (not visible in RGB Channel, due to IR-Light)
 
+    # Plausible axial-depth window [m] for a ToF return. The real-sensor export
+    # marks invalid pixels with finite but absurd values (up to ~2.6e8 m after
+    # unit scaling) instead of NaN or 0, so an isfinite() test alone lets them
+    # through into the calibration.
+    VALID_Z_RANGE = (0.1, 5.0)
+
     # ─────────────────────────────────────────────────────────────────────────
     # File utilities
     # ─────────────────────────────────────────────────────────────────────────
 
     @staticmethod
-    def parse_distance_from_name(filename: str) -> Optional[float]:
+    def parse_distance_from_name(filename: str, offset: float = 0.0) -> Optional[float]:
         """
         Parse target distance in metres from a filename.
 
         Handles formats like:  SL_0.4m.exr, SL_ToF_1.2m.pcd, 3_6m_frame.png
+
+        Pos0…Pos9 carry no distance in the name, so they come from the logbook
+        table below. `offset` [mm] is subtracted from every entry — a POSITIVE
+        offset means the wall stood NEARER than the tape said. Set it per camera
+        via `dist_offset` in calibrate.CAMERAS.
         """
 
-        if 'Pos' not in filename:
-            m = re.search(r"([0-9]+(?:[.,_][0-9]+)?)m", os.path.basename(filename), re.IGNORECASE)
-            if not m:
-                return None
-            s = m.group(1).replace("_", ".").replace(",", ".")
-            try:
-                return float(s)
-            except ValueError:
-                return None
-        else:
-            posName = filename[:-4]
-            if len(posName) > 4:
-                posName = posName[-4:]
-            offset = 0
-            GROUND_TRUTH = {
-                "Pos0": 460-offset, "Pos1": 510-offset, "Pos2": 572-offset, "Pos3": 651-offset, "Pos4": 755-offset,
-                "Pos5": 899-offset, "Pos6": 1111-offset, "Pos7": 1454-offset, "Pos8": 2103-offset, "Pos9": 3800-offset,}  
-            return f'{float(GROUND_TRUTH[posName])/1000:.2f}'
-            
+        stem = os.path.splitext(os.path.basename(filename))[0]
 
+        GROUND_TRUTH = {
+            "Pos0": 460-offset, "Pos1": 510-offset, "Pos2": 572-offset, "Pos3": 651-offset, "Pos4": 755-offset,
+            "Pos5": 899-offset, "Pos6": 1111-offset, "Pos7": 1454-offset, "Pos8": 2103-offset, "Pos9": 3800-offset,}
+        if stem in GROUND_TRUTH:
+            return GROUND_TRUTH[stem] / 1000.0
+
+        m = re.search(r"([0-9]+(?:[.,_][0-9]+)?)m", stem, re.IGNORECASE)
+        if not m:
+            return None
+        try:
+            return float(m.group(1).replace("_", ".").replace(",", "."))
+        except ValueError:
+            return None
 
     def load_images(self, folder_path: str, pattern: str = "_image_rendered.png") -> List[str]:
         """Return sorted list of image paths matching *pattern* inside *folder_path*."""
@@ -153,7 +160,8 @@ class DotCalibration:
         return np.dtype(dt)
 
     def load_tof_pcd(self, pcd_path: str, unit_scale: float = 0.001,
-                     depth_mode: str = "radial") -> dict:
+                     depth_mode: str = "radial",
+                     z_range: Optional[Tuple[float, float]] = None) -> dict:
         """
         Load ToF data from an organised PCD (ASCII or binary) file.
 
@@ -162,6 +170,8 @@ class DotCalibration:
         pcd_path    : path to .pcd file
         unit_scale  : multiply xyz by this factor (0.001 converts mm → m)
         depth_mode  : "radial" = sqrt(x²+y²+z²); "axial" or "z" = z only
+        z_range     : (z_min, z_max) plausible axial depth window [m]; points
+                      outside it are set to NaN. Defaults to `VALID_Z_RANGE`.
 
         Returns
         -------
@@ -194,6 +204,13 @@ class DotCalibration:
 
         points = np.column_stack([columns["x"], columns["y"], columns["z"]]).astype(np.float64) * unit_scale
 
+        # Drop implausible returns (see VALID_Z_RANGE) so that every downstream
+        # isfinite() check actually rejects them.
+        z_lo, z_hi = self.VALID_Z_RANGE if z_range is None else z_range
+        bad = ~np.all(np.isfinite(points), axis=1) \
+            | (points[:, 2] < z_lo) | (points[:, 2] > z_hi)
+        points[bad] = np.nan
+
         if "grayValue" in columns:
             intensity = columns["grayValue"].astype(np.float64)
         elif "intensity" in columns:
@@ -225,12 +242,14 @@ class DotCalibration:
         return tof_data
 
     @staticmethod
-    def _sample_points_map(points_map: np.ndarray, u: float, v: float) -> Optional[np.ndarray]:
+    def _sample_points_map(points_map: np.ndarray, u: float, v: float,
+                           z_range: Optional[Tuple[float, float]] = None) -> Optional[np.ndarray]:
         """Bilinearly sample a (H, W, 3) point map at subpixel (u, v).
 
-        Corner points that are invalid (non-finite or zero, i.e. no ToF return —
-        common between dots in sparsely illuminated clouds) are excluded and the
-        bilinear weights renormalised over the valid corners.
+        Corner points that are invalid (non-finite, zero, or outside
+        `VALID_Z_RANGE`, i.e. no ToF return, common between dots in sparsely
+        illuminated clouds) are excluded and the bilinear weights renormalised
+        over the valid corners.
 
         Returns the interpolated 3-D point, or None if out of bounds / no valid
         corner.
@@ -245,8 +264,10 @@ class DotCalibration:
         corners = points_map[[v0, v0, v1, v1], [u0, u1, u0, u1], :]
         weights = np.array([(1 - du) * (1 - dv), du * (1 - dv),
                             (1 - du) * dv, du * dv])
+        z_lo, z_hi = DotCalibration.VALID_Z_RANGE if z_range is None else z_range
         valid = np.all(np.isfinite(corners), axis=1) \
-            & (np.linalg.norm(corners, axis=1) > 1e-6)
+            & (np.linalg.norm(corners, axis=1) > 1e-6) \
+            & (corners[:, 2] >= z_lo) & (corners[:, 2] <= z_hi)
         w_sum = np.sum(weights[valid])
         if not np.any(valid) or w_sum <= 1e-12:
             return None
@@ -278,7 +299,9 @@ class DotCalibration:
         dists, idx = pixel_tree.query([u, v], k=k)
         dists = np.atleast_1d(dists)
         idx = np.atleast_1d(idx)
-        valid = np.isfinite(dists) & (dists <= max_px)
+        idx = np.clip(idx, 0, len(points) - 1)
+        valid = np.isfinite(dists) & (dists <= max_px) \
+            & np.all(np.isfinite(points[idx]), axis=1)
         if not np.any(valid):
             return None
         w = 1.0 / np.maximum(dists[valid], 1e-6)
@@ -840,6 +863,28 @@ class DotCalibration:
     # ─────────────────────────────────────────────────────────────────────────
 
     @staticmethod
+    def _robust_linfit(x: np.ndarray, y: np.ndarray,
+                       iters: int = 3, n_sigma: float = 2.5) -> Tuple[float, float]:
+        """Least-squares y = slope·x + intercept with sigma-clipping."""
+        x = np.asarray(x, float)
+        y = np.asarray(y, float)
+        slope = intercept = float("nan")
+        for _ in range(max(1, iters)):
+            if x.size < 2:
+                break
+            A = np.column_stack([x, np.ones_like(x)])
+            (slope, intercept), *_ = np.linalg.lstsq(A, y, rcond=None)
+            r = y - (slope * x + intercept)
+            sd = float(np.std(r))
+            if sd < 1e-12:
+                break
+            keep = np.abs(r) <= n_sigma * sd
+            if keep.all() or keep.sum() < 3:
+                break
+            x, y = x[keep], y[keep]
+        return float(slope), float(intercept)
+
+    @staticmethod
     def detect_travel_mode(subpixel_list: List[List[dict]],
                            cal_dists: List[float],
                            K: np.ndarray,
@@ -849,18 +894,26 @@ class DotCalibration:
         whether the transmitter sits to the side (X mode) or above/below the
         receiver (Y mode), and derive a signed baseline guess from the parallax.
 
-        The pixel shift of a dot between two distances is linear in Δ(1/z):
-        Δu ≈ fx·B_x·Δ(1/z) and Δv ≈ fy·B_y·Δ(1/z). Regressing the tracked
-        per-dot displacements against Δ(1/z) therefore yields both the dominant
-        travel axis AND a signed estimate of the baseline component along it —
-        no manually guessed sign needed.
+        Each dot's pixel position is affine in w = 1/z (see `trail_line_params`):
+            u(w) = u_∞ + a_u·w   with   a_u = fx·B_x - B_z·(u_∞ - cx)
+            v(w) = v_∞ + a_v·w   with   a_v = fy·B_y - B_z·(v_∞ - cy)
+        So fitting (u_∞, a_u, v_∞, a_v) per dot and then regressing a_u against
+        (u_∞ - cx), and a_v against (v_∞ - cy), recovers the FULL 3-D baseline
+        from pixel data alone: the intercepts give B_x, B_y and the common slope
+        gives -B_z. No manually guessed sign, and no assumption that the
+        transmitter is coplanar with the receiver: on the Schmersal rig B_z is
+        ~33 mm, comparable to B_y, and pinning it to 0 leaves the guess ~9 cm
+        off, which is more than the later outlier rejection can absorb.
+
+        Falls back to the pure-axis (B_z = 0) estimate when too few dots are
+        tracked across enough distances to make the second regression stable.
 
         Parameters
         ----------
         subpixel_list : tracked list (per distance) of dicts {id, x, y},
                         ordered near → far like `cal_dists`
         cal_dists     : calibration distances [m], same order
-        K             : 3×3 intrinsics (fy may be negative — handled via K)
+        K             : 3x3 intrinsics (fy may be negative — handled via K)
         mode_override : optional "x"/"y" to force the mode; the baseline
                         component is still estimated along the forced axis
 
@@ -871,6 +924,8 @@ class DotCalibration:
           B_axis_est   : signed baseline estimate along the travel axis [m]
           B_guess_vec  : (3,) baseline guess vector for back-projection/tracking
           du_dw, dv_dw : median pixel shifts per unit Δ(1/z) (diagnostics)
+          B_z_est      : signed baseline component along the optical axis [m]
+          n_fit        : number of dots that entered the affine regression
         """
         n_dist = len(subpixel_list)
         if n_dist < 2:
@@ -880,17 +935,31 @@ class DotCalibration:
         w = 1.0 / np.asarray(cal_dists, dtype=float)
 
         du_dw, dv_dw = [], []
+        u_inf, v_inf = [], []
         all_ids = set().union(*[p.keys() for p in pos])
-        for i in all_ids:
+        for i in sorted(all_ids):
             present = [j for j in range(n_dist) if i in pos[j]]
             if len(present) < 2:
                 continue
-            j0, j1 = present[0], present[-1]
-            dw = w[j1] - w[j0]
-            if abs(dw) < 1e-9:
+            us = np.array([pos[j][i][0] for j in present])
+            vs = np.array([pos[j][i][1] for j in present])
+            ws = w[present]
+            if np.ptp(ws) < 1e-9:
                 continue
-            du_dw.append((pos[j1][i][0] - pos[j0][i][0]) / dw)
-            dv_dw.append((pos[j1][i][1] - pos[j0][i][1]) / dw)
+            if len(present) >= 3:
+                # Affine fit over ALL observations; the intercept is the
+                # vanishing point (w -> 0), needed for the B_z regression.
+                A = np.column_stack([ws, np.ones_like(ws)])
+                (au, bu), *_ = np.linalg.lstsq(A, us, rcond=None)
+                (av, bv), *_ = np.linalg.lstsq(A, vs, rcond=None)
+            else:
+                dw = ws[-1] - ws[0]
+                au, av = (us[-1] - us[0]) / dw, (vs[-1] - vs[0]) / dw
+                bu, bv = us[0] - au * ws[0], vs[0] - av * ws[0]
+            du_dw.append(float(au))
+            dv_dw.append(float(av))
+            u_inf.append(float(bu))
+            v_inf.append(float(bv))
         if not du_dw:
             raise ValueError("No dot was tracked across two or more distances.")
 
@@ -899,26 +968,123 @@ class DotCalibration:
         mode = mode_override or ("x" if abs(med_du) >= abs(med_dv) else "y")
 
         fx, fy = float(K[0, 0]), float(K[1, 1])
-        if mode == "x":
-            B_axis = med_du / fx
-            B_guess_vec = np.array([B_axis, 0.0, 0.0])
+        cx, cy = float(K[0, 2]), float(K[1, 2])
+
+        # a_u = fx·B_x − B_z·(u_∞ − cx):  slope -> −B_z, intercept -> fx·B_x.
+        n_fit = len(du_dw)
+        B_x = B_y = B_z = None
+        # The B_z regression needs the vanishing points to actually SPREAD over
+        # the sensor; a single row or column of dots leaves its slope
+        # unconstrained and would return a confident but meaningless B_z.
+        spread_ok = (n_fit >= 8
+                     and np.ptp(u_inf) > 0.25 * abs(fx)
+                     and np.ptp(v_inf) > 0.25 * abs(fy))
+        if spread_ok:
+            su, bu = DotCalibration._robust_linfit(np.array(u_inf) - cx, np.array(du_dw))
+            sv, bv = DotCalibration._robust_linfit(np.array(v_inf) - cy, np.array(dv_dw))
+            if np.all(np.isfinite([su, bu, sv, bv])):
+                B_x, B_y = bu / fx, bv / fy
+                # Both regressions see the same B_z; average them.
+                B_z = -0.5 * (su + sv)
+                if np.linalg.norm([B_x, B_y, B_z]) > 0.5:
+                    # Implausible for a hand-held rig — distrust and fall back.
+                    B_x = B_y = B_z = None
+
+        if B_z is None:
+            # Too few dots for the second regression — fall back to the
+            # pure-axis guess (B_z pinned to 0).
+            B_axis = (med_du / fx) if mode == "x" else (med_dv / fy)
+            B_guess_vec = (np.array([B_axis, 0.0, 0.0]) if mode == "x"
+                           else np.array([0.0, B_axis, 0.0]))
+            B_z = 0.0
         else:
-            B_axis = med_dv / fy
-            B_guess_vec = np.array([0.0, B_axis, 0.0])
+            B_guess_vec = np.array([B_x, B_y, B_z])
+            B_axis = B_guess_vec[0] if mode == "x" else B_guess_vec[1]
 
         return {"mode": mode, "B_axis_est": float(B_axis),
-                "B_guess_vec": B_guess_vec, "du_dw": med_du, "dv_dw": med_dv}
+                "B_guess_vec": B_guess_vec, "du_dw": med_du, "dv_dw": med_dv,
+                "B_z_est": float(B_z), "n_fit": int(n_fit)}
 
     # ─────────────────────────────────────────────────────────────────────────
     # Calibration Step 3 – 3-D back-projection
     # ─────────────────────────────────────────────────────────────────────────
+
+    _annulus_warned = set()
+
+    @classmethod
+    def _fit_annulus_to_spacing(cls, subpixels: List[dict], cfg: dict,
+                                max_frac: float = 0.45,
+                                warn_tag: str = "") -> dict:
+        """
+        Shrink the annulus so it cannot reach the neighbouring dots.
+
+        The corrupted halo scales with the dot's PSF while the usable outer
+        radius scales with the dot SPACING, and the two are independent: the
+        sparse 19.06 set has ~42 px spacing with a ~7 px halo, the Coherent set
+        ~15 px spacing with a ~3 px halo. A ring tuned for one silently samples
+        its neighbours' corrupted pixels on the other, so clamp r_out to
+        `max_frac` of the median nearest-neighbour spacing and scale r_in with
+        it. Returns the kwargs for `annulus_axial_z`.
+        """
+        ring = dict(cfg)
+        r_in = float(ring.get("r_in", 8.0))
+        r_out = float(ring.get("r_out", 14.0))
+        if len(subpixels) < 2:
+            return ring
+        P = np.array([[d["x"], d["y"]] for d in subpixels], float)
+        spacing = float(np.median(cKDTree(P).query(P, k=2)[0][:, 1]))
+        r_max = max_frac * spacing
+        if r_out > r_max:
+            scale = r_max / r_out
+            ring["r_in"], ring["r_out"] = r_in * scale, r_out * scale
+            key = (round(spacing, 1), round(r_in, 1), round(r_out, 1))
+            if key not in cls._annulus_warned:
+                cls._annulus_warned.add(key)
+                print(f"  [annulus] dot spacing {spacing:.1f} px is too tight for "
+                      f"r_out={r_out:.1f}; shrinking ring to "
+                      f"{ring['r_in']:.1f}–{ring['r_out']:.1f} px"
+                      + (f"  ({Path(warn_tag).name})" if warn_tag else ""))
+        return ring
+
+    @staticmethod
+    def annulus_axial_z(z_map: np.ndarray, u: float, v: float,
+                        r_in: float = 8.0, r_out: float = 14.0,
+                        min_valid: int = 8) -> float:
+        """
+        Median axial ToF depth over an annulus around pixel (u, v).
+
+        On this rig the dot projector is on during the ToF capture, so the dot
+        pixels themselves are at/near saturation and their phase — hence their
+        depth — is wrong, while the surface between the dots reads correctly.
+        Sampling a ring that clears the dot's corrupted halo (which reaches
+        ~±9 px) but stays inside the dot spacing (~46 px) recovers the surface
+        depth at the dot without assuming anything about the target's shape.
+
+        The window is clipped at the image border rather than skipping border
+        dots. Returns NaN if fewer than `min_valid` finite pixels remain.
+        """
+        H, W = z_map.shape[:2]
+        ui, vi = int(round(u)), int(round(v))
+        r = int(np.ceil(r_out))
+        u0, u1 = max(0, ui - r), min(W, ui + r + 1)
+        v0, v1 = max(0, vi - r), min(H, vi + r + 1)
+        if u1 <= u0 or v1 <= v0:
+            return float("nan")
+        sub = z_map[v0:v1, u0:u1]
+        yy, xx = np.mgrid[v0 - vi:v1 - vi, u0 - ui:u1 - ui]
+        rr = np.hypot(xx, yy)
+        m = (rr >= r_in) & (rr <= r_out) & np.isfinite(sub)
+        if int(m.sum()) < min_valid:
+            return float("nan")
+        return float(np.median(sub[m]))
 
     def backproject_calibration_dots(self, subpixel_list: List[List[dict]],
                                       tof_paths: List[str],
                                       K: np.ndarray,
                                       pcd_unit_scale: float = 0.001,
                                       pcd_depth_mode: str = "radial",
-                                      baseline_guess=3.8e-2) \
+                                      baseline_guess=3.8e-2,
+                                      tof_sample: Optional[dict] = None) \
             -> Tuple[np.ndarray, np.ndarray]:
         """
         Back-project each detected dot position into 3-D using the ToF point map
@@ -937,6 +1103,18 @@ class DotCalibration:
         pcd_depth_mode  : "radial" or "axial"
         baseline_guess  : initial transmitter offset guess [m] — scalar (legacy
                           x-offset) or full 3-vector; used to compute U_tx
+        tof_sample      : how to read the ToF depth at a dot.
+                          None / {"mode": "center"} (default) bilinearly samples
+                          the point map AT the dot — correct for the simulated
+                          PBRT clouds and for captures whose ToF frame has the
+                          projector off.
+                          {"mode": "annulus", "r_in": 8.0, "r_out": 14.0} takes
+                          the median axial depth of a ring around the dot and
+                          places U on the dot's own camera ray (see
+                          `annulus_axial_z`) — needed when the projector is on
+                          during the ToF capture and saturates the dot pixels.
+                          Requires an organised cloud and a correct K; falls
+                          back to "center" for unorganised clouds.
 
         Returns
         -------
@@ -952,11 +1130,29 @@ class DotCalibration:
         n_dist = len(subpixel_list)
         U = np.full((n_dots, n_dist, 3), np.nan, dtype=np.float64)
 
+        cfg = dict(tof_sample or {})
+        mode = cfg.pop("mode", "center")
+        fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
+
         for j, subpixels in enumerate(subpixel_list):
             tof_data = self.load_tof_pcd(tof_paths[j], unit_scale=pcd_unit_scale,
                                           depth_mode=pcd_depth_mode)
-            sample = self._tof_point_sampler(tof_data, K)
 
+            if mode == "annulus" and "points_map" in tof_data:
+                z_map = tof_data["points_map"][..., 2]
+                ring = self._fit_annulus_to_spacing(subpixels, cfg, warn_tag=tof_paths[j])
+                for dot in subpixels:
+                    z = self.annulus_axial_z(z_map, dot["x"], dot["y"], **ring)
+                    if not np.isfinite(z):
+                        continue
+                    # Place the point on the DOT's ray, not at the annulus
+                    # centroid — a ring median is unbiased in depth but says
+                    # nothing about where the dot sits laterally.
+                    U[dot["id"], j, :] = z * np.array(
+                        [(dot["x"] - cx) / fx, (dot["y"] - cy) / fy, 1.0])
+                continue
+
+            sample = self._tof_point_sampler(tof_data, K)
             for dot in subpixels:
                 P = sample(dot["x"], dot["y"])
                 if P is not None:
@@ -1547,6 +1743,11 @@ class ToFSampler:
             self.points_map = tof_data["points_map"]
             self.H, self.W = depth_map.shape
         else:
+            # NaN-marked invalid returns would poison both the tree and every
+            # query, so index the finite subset only.
+            keep = np.all(np.isfinite(self.points), axis=1)
+            self.points = self.points[keep]
+            self.distance = self.distance[keep]
             self.tree = cKDTree(DotCalibration._project_to_pixels(self.points, K))
 
     def point_at(self, u: float, v: float, k: int = 4, max_px: float = 2.0) -> Optional[np.ndarray]:

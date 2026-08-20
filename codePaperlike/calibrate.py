@@ -27,6 +27,10 @@ from dot_calibration import DotCalibration
 
 ROOT = Path(__file__).resolve().parent.parent
 
+K_SCHMERSAL_REAL = np.array([[500.36, 0.0, 322.84],
+                             [0.0, 505.62, 242.18],
+                             [0.0, 0.0, 1.0]])
+
 # cal_blob threshold applies to the [0,1]-normalised image (see
 # DotCalibration._normalize_for_log), so one value fits PNG and EXR alike.
 CAMERAS = {
@@ -42,23 +46,41 @@ CAMERAS = {
         K=np.array([[503.1, 0.0, 320.0], [0.0, -503.1, 240.0], [0.0, 0.0, 1.0]]),
         cal_blob=dict(max_sigma=14, num_sigma=10, min_sigma=8, threshold=0.05),
     ),
-    # Real-sensor recordings (EXR SL images, binary PCDs). Farthest distances
-    # lose dots (dim/small) — the FOV-aware tracking + min-track invalidation
-    # handle the partial detections.
+
     "SchmersalReal": dict(
         sl_cal=ROOT / "Pictures/Calibration/SchmersalReal/19.06/SL",
         tof_cal=ROOT / "Pictures/Calibration/SchmersalReal/19.06/ToF",
-        K=np.array([[503.1, 0.0, 320.0], [0.0, -503.1, 240.0], [0.0, 0.0, 1.0]]),
+        K=K_SCHMERSAL_REAL,
         cal_blob=dict(max_sigma=10, num_sigma=10, min_sigma=10, threshold=0.05),
-    ), 
-        "SchmersalRealCoherent": dict(
+        tof_sample=dict(mode="annulus", r_in=8.0, r_out=14.0),
+        pcd_glob="Pos*.pcd",
+        exclude=("Pos9",),   # 3.8 m: phase unwrapping fails on this frame
+        dist_offset=58,
+    ),
+
+    "SchmersalRealCoherent": dict(
         sl_cal=ROOT / "Pictures/Calibration/SchmersalReal/19.06/Coherent/SL",
         tof_cal=ROOT / "Pictures/Calibration/SchmersalReal/19.06/Coherent/ToF",
-        K=np.array([[503.1, 0.0, 320.0], [0.0, -503.1, 240.0], [0.0, 0.0, 1.0]]),
+        K=K_SCHMERSAL_REAL,
         cal_blob=dict(max_sigma=4, num_sigma=4, min_sigma=4, threshold=0.03),
-    ), 
+        # ~1100 dots at ~15 px spacing, but the smaller dots only corrupt out to
+        # ~3 px — so the ring is tighter than the sparse set's, not looser.
+        tof_sample=dict(mode="annulus", r_in=4.0, r_out=6.5),
+        pcd_glob="Pos*.pcd",
+        exclude=("Pos9",),   # phase unwrapping fails on this frame
+        dist_offset=-266,
+    ),
 
 }
+
+
+def distance_for(cfg, dotCal, path) -> float:
+    """Calibration distance [m] for one frame, with the camera's offset applied.
+
+    `dist_offset` [mm] shifts the Pos… logbook table for sessions where the rig
+    did not stand where the tape says (see DotCalibration.parse_distance_from_name).
+    """
+    return dotCal.parse_distance_from_name(str(path), offset=cfg.get("dist_offset", 0.0))
 
 
 def sanitize(obj):
@@ -167,10 +189,15 @@ def run_calibration(camera, name, subpixel_mode="GPR", track_tx_space=False,
     K_inv = np.linalg.inv(K)
     dotCal = DotCalibration()
 
-    tof_paths = sorted(cfg["tof_cal"].glob("ToF_*m.pcd"),
-                       key=lambda p: dotCal.parse_distance_from_name(p.name) or 999.0)
+    excl = set(cfg.get("exclude", ()))
+    tof_paths = sorted(
+        (p for p in cfg["tof_cal"].glob(cfg.get("pcd_glob", "ToF_*m.pcd"))
+         if p.stem not in excl),
+        key=lambda p: distance_for(cfg, dotCal, p) or 999.0)
     tof_paths = [str(p) for p in tof_paths]
-    cal_dists = [dotCal.parse_distance_from_name(p) for p in tof_paths]
+    if not tof_paths:
+        sys.exit(f"No calibration PCDs matched in {cfg['tof_cal']}")
+    cal_dists = [distance_for(cfg, dotCal, p) for p in tof_paths]
     print(f"Calibration distances ({len(cal_dists)}): {cal_dists}")
 
     # ── Steps 1+2: LoG detection + subpixel localisation ────────────────
@@ -198,6 +225,8 @@ def run_calibration(camera, name, subpixel_mode="GPR", track_tx_space=False,
     print(f"Travel mode: {mode}  (du/dw={mode_info['du_dw']:.2f} px·m, "
           f"dv/dw={mode_info['dv_dw']:.2f} px·m)")
     print(f"Signed baseline estimate along {mode}: {mode_info['B_axis_est'] * 100:.3f} cm")
+    print(f"B_guess = {B_guess_vec} (B_z {mode_info['B_z_est'] * 100:.3f} cm "
+          f"from {mode_info['n_fit']} dots)")
 
     # Optional paper-style transmitter-space re-tracking with the derived guess.
     if track_tx_space:
@@ -213,7 +242,8 @@ def run_calibration(camera, name, subpixel_mode="GPR", track_tx_space=False,
     # ── Step 3: back-projection ─────────────────────────────────────────
     U, U_tx = dotCal.backproject_calibration_dots(
         subpixel_list, tof_paths, K=K,
-        pcd_depth_mode="radial", baseline_guess=B_guess_vec)
+        pcd_depth_mode="radial", baseline_guess=B_guess_vec,
+        tof_sample=cfg.get("tof_sample"))
 
     # ── Step 4: baseline (full 3-D, with outlier removal) ───────────────
     intersection, n_lines = dotCal.estimate_baseline(
@@ -264,6 +294,7 @@ def run_calibration(camera, name, subpixel_mode="GPR", track_tx_space=False,
             "baseline_guess": B_guess_vec.tolist(),
             "subpixel_mode": subpixel_mode,
             "pcd_depth_mode": "radial",
+            "tof_sample": cfg.get("tof_sample"),
             "pcd_unit_scale": 0.001,
             "track_in_tx_space": track_tx_space,
             "baseline_outlier_sigma": outlier_sigma,
