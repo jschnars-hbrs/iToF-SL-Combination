@@ -352,7 +352,7 @@ class DotCalibration:
             raise ValueError(f"Invalid image for LoG blob detection: {image_path}")
 
         detect_img = self._normalize_for_log(image)
-        blobs = feature.blob_log(detect_img, max_sigma=max_sigma, num_sigma=num_sigma, min_sigma=min_sigma, threshold=threshold)
+        blobs = feature.blob_log(detect_img, max_sigma=max_sigma, num_sigma=num_sigma, min_sigma=min_sigma, threshold=threshold, exclude_border=True)
         blobs[:, 2] = blobs[:, 2] * (2 ** 0.5)  # convert sigma to radius
         if add_synthetic_gaussian:
             image_out = self.add_gaussian_to_detected_blob(image, blobs)
