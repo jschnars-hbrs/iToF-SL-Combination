@@ -48,14 +48,12 @@ CAMERAS = {
     ),
 
     "SchmersalReal": dict(
-        sl_cal=ROOT / "Pictures/Calibration/SchmersalReal/19.06/SL",
-        tof_cal=ROOT / "Pictures/Calibration/SchmersalReal/19.06/ToF",
+        sl_cal=ROOT / "Pictures/Calibration/SchmersalReal/25.08/SL",
+        tof_cal=ROOT / "Pictures/Calibration/SchmersalReal/25.08/ToF",
         K=K_SCHMERSAL_REAL,
         cal_blob=dict(max_sigma=10, num_sigma=10, min_sigma=10, threshold=0.05),
-        tof_sample=dict(mode="annulus", r_in=8.0, r_out=14.0),
         pcd_glob="Pos*.pcd",
-        exclude=("Pos9",),   # 3.8 m: phase unwrapping fails on this frame
-        dist_offset=58,
+        dist_offset=0,
     ),
 
     "SchmersalRealCoherent": dict(

@@ -1,0 +1,85 @@
+Distances:
+
+return np.array([402+offsetSensor-offsetVE, 439+offsetSensor-offsetVE, 486+offsetSensor-offsetVE, 545+offsetSensor-offsetVE, 621+offsetSensor-offsetVE, 720+offsetSensor-offsetVE, 857+offsetSensor-offsetVE, 1059+offsetSensor-offsetVE, 1385+offsetSensor-offsetVE, 2000+offsetSensor-offsetVE])
+            #return np.arange(40,3350,50)
+-> 402, 439, 486, 545, 621, 720, 857, 1059, 1385, 2000
+
+Config:
+
+defaults:
+  - camera: "Schmersal_AM-T100_rAOI"  #Select the camera config file in Configs/camera/
+  - _self_
+
+useUI: False            #Set True to use the UI for allignment and setting of measurement parameters
+alignAt: 0             #Leave at 0 if you don't want to move the LTS before aligning, else enter distance in mm
+user: Julian
+
+meas:
+  minPosition: 0      #First position in mm
+  maxPosition: 3800       #Last position in mm
+  step: -1              #Step size in mm 
+  framesNr: 10          #Number of frames to capture per position
+  target: Wall       #Target of the measurement (e.g. Ceiling, Wall, Chessboard, ...) does not affect the measurement
+  warmUpTime: 0   #Warmup Time in Minutes
+  flags:
+    ref2meter: False    #Set True to perform a reference mearsurement at the 2000mm postition after all other measurements
+    useLTS: True       #Set True to use the linear translation stage (LTS)
+    useLDS: True       #Set True to use the laser distance sensor (LDS)
+    printPCD: False     #Set True to print the point cloud data (PCD) file after each position
+    printRaw: True      #Set True to print the raw data (RAW) file after each position
+    averageData: False  #Set True to average the data over all frames per position and save only save five values per position
+    flushBuffer: True   #Set True to flush the camera buffer before each measurement. (10 frames are captured and discarded)
+    useMultipleSettings: True    #Set True to sweep through all settings in the config file per position. If False only the first setting will be used.
+    runThreaded: True  #Set True to run the camera in a separate thread using the CameraListenerWrapper.
+    storeTemperature: True #Set True to store the temperature at each position in a CSV file. If the camera performes the warmup sequenze a seperate CSV for the warmup is generated.
+  LaserOffset: -82        #Offset of the laser to the optical axis in mm (only needed for some cameras)
+  flushBufferCount: 100  #Amount of Images which will be flashed before measurement default:10
+#Add comment to the measurement to later identify the measurement
+comment: Kombinierte iToF und SL Kalibrieriung
+
+#Hydra settings, change the output folder here if needed. Use ${now:%Y-%m-%d} and ${now:%Y-%m-%d_%H-%M-%S} to automatically create new folders based on the current date and time.
+# Default should be 'outputs/${now:%Y-%m-%d}/${now:%Y-%m-%d_%H-%M-%S}'
+hydra:
+  run:
+    dir: '/mnt/Storage/tofBenchmarkingFacility/outputs/${now:%Y-%m-%d}/${now:%Y-%m-%d_%H-%M-%S}'
+
+
+Schmersal_AM-T100_rAOI:
+
+#camera:
+name: "SCHMERSAL_AMT100_custom"
+width: 640
+height: 480
+fieldofview: 
+  x: 67
+  y: 51
+presets:
+  name: "custom"
+  threaded: False
+  start: False
+filterOff: True 
+settings:
+  AcquisitionFrameRate: 10
+  AcquisitionFrameRateEnable: True
+  ExposureTime: 100 #Exposure time in µs
+  SensorOutputMode: "AandB"
+  PhaseQty: 4
+  Frequency: [100 ,90] #, 80 ] #, 30] 
+  DelayCoarse: [7,5]
+  DelayFine: [0,9]
+  DelaySuperFine: [5,1]
+  # Frequency: [90]
+  # DelayCoarse: [5] 
+  # DelayFine: [0] 
+  # DelaySuperFine: [5] 
+  # Frequency: [80]
+  # DelayCoarse: [4] 
+  # DelayFine: [2] 
+  # DelaySuperFine: [1] 
+  DeviceTemperatureSelector: "Sensor"     # Sensor LaserDiodeDriver FpgaPL FpgaPS FpgaPsRemote
+  EnableRAIO: False
+  ActiveVcsel: 0b010000 # Binary Config um die Anzahl an aktiven VCSEL zu schalten - 1 um das VCSEL an der Position einzuschalten 0 für aus. 000100 -> VCSEL 3 aktiv, 010001 VCSEL 1 und 5 aktiv, 100000 -> VCSEL 6 aktiv, 111111 -> alle aktiv
+  CustomVcselPower : 1580 # changes illumination power - value does not correspond to actual optical power values. Eyesaffety limit < 1580.
+  StoreVCSELTemperature: True
+  # LaserOffset: -82 #82 # -31 77        #Offset of the laser to the optical axis in mm. Negative values mean, that the camera is further away from the wall than the LDS sensor (most cameras)
+

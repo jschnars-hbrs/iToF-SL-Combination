@@ -53,10 +53,10 @@ class DotCalibration:
         """
 
         stem = os.path.splitext(os.path.basename(filename))[0]
-
+       
         GROUND_TRUTH = {
-            "Pos0": 460-offset, "Pos1": 510-offset, "Pos2": 572-offset, "Pos3": 651-offset, "Pos4": 755-offset,
-            "Pos5": 899-offset, "Pos6": 1111-offset, "Pos7": 1454-offset, "Pos8": 2103-offset, "Pos9": 3800-offset,}
+            "Pos0": 402-offset, "Pos1": 439-offset, "Pos2": 486-offset, "Pos3": 545-offset, "Pos4": 621-offset,
+            "Pos5": 720-offset, "Pos6": 857-offset, "Pos7": 1059-offset, "Pos8": 1385-offset, "Pos9": 2000-offset,}
         if stem in GROUND_TRUTH:
             return GROUND_TRUTH[stem] / 1000.0
 
