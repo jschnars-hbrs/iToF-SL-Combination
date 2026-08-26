@@ -24,8 +24,8 @@ except ImportError:
 
 from removePCDoutliers import read_pcd
 
-DEFAULT_INPUT = Path("PCD")
-DEFAULT_OUTPUT = Path("Test_EXR")
+DEFAULT_INPUT = Path("Pictures/Test/FlatWallSchmersalReal")
+DEFAULT_OUTPUT = Path("Pictures/Test/FlatWallSchmersalRealEXR")
 # Channel name must match DotCalibration.SL_CHANNEL (codePaperlike/dot_calibration.py:28)
 # so read_image() can pull it by name.
 SL_CHANNEL = "S0.940,000nm"
