@@ -574,7 +574,7 @@ def _eps_curve_fig(ex, suptitle):
     return fig
 
 
-def _depth_comparison_fig(dot_idx, series, title):
+def _depth_comparison_fig(dot_idx, series, title, limit = None):
     """Per-dot depth series (list of (label, values)), GT line and σ in legend."""
     import matplotlib.pyplot as plt
     _ls = ".-" if CONNECT_DOTS else "."
@@ -590,6 +590,8 @@ def _depth_comparison_fig(dot_idx, series, title):
         plt.axhline(GT_DISTANCE, color="k", linewidth=0.8, linestyle=":",
                     label=f"GT = {GT_DISTANCE:.2f} m")
     plt.title(title)
+    if limit is not None:
+        plt.ylim(limit[0],limit[1])
     plt.xlabel("Calibrated dot index i"); plt.ylabel("Depth [m]")
     plt.legend(bbox_to_anchor=(0.5, -0.18), loc="upper center", borderaxespad=0, ncol=3)
     plt.grid(alpha=0.3)
@@ -638,7 +640,7 @@ def _eps_hist_fig(eps_all, threshold, title):
 # Approach 1: Consistency Error (Microsoft-Paper §4.2, first approach)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def run_approach_1(dotCal, cal, setup, make_plots=False):
+def run_approach_1(dotCal, cal, setup, make_plots=False,dot_sample = [], exclude = []):
     """Pure trail scan — no dot localisation, no runtime triangulation.
 
     For every calibrated dot trail, the ToF depth image is resampled along the
@@ -664,6 +666,12 @@ def run_approach_1(dotCal, cal, setup, make_plots=False):
             Z_tof_curve=Z_tof, eps_curve=eps, w_curve=trail["w"],
         ))
 
+    if exclude:
+        exclude_set = set(exclude)
+        for dot in results:
+            if dot["i"] in exclude_set:
+                dot["Z_out"] = np.nan
+
     z_out_arr = np.array([r["Z_out"] for r in results])
     eps_all = np.array([r["eps_best"] for r in results], float)
     n_invalid = int(np.sum(~np.isfinite(z_out_arr)))
@@ -681,6 +689,10 @@ def run_approach_1(dotCal, cal, setup, make_plots=False):
         if finite_idx:
             examples = [("best ε", finite_idx[int(np.argmin(eps_all[finite_idx]))]),
                         ("worst ε", finite_idx[int(np.argmax(eps_all[finite_idx]))])]
+        if len(dot_sample) > 0:
+            for dotsample in dot_sample:
+                examples.append((f"picked dot sample {dotsample}", dotsample))
+    
         for label, k_ex in examples:
             ex = results[k_ex]
             figures[f"approach1_eps_curve_{label.replace(' ', '_').replace('ε', 'eps')}"] = \
@@ -714,7 +726,7 @@ def run_approach_1(dotCal, cal, setup, make_plots=False):
 # Approach 2: Gaussian Maximum-Likelihood Fusion (Agresti & Zanuttigh)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def run_approach_2(dotCal, cal, setup, make_plots=False):
+def run_approach_2(dotCal, cal, setup, make_plots=False, limit = None):
     """AB-peak front-end (identical to Approach 3), then Agresti's ML fusion
     with ONE Gaussian per modality (eq. 16/17 without the spatial 7×7 weighted
     sum — each dot has one concrete candidate at known pixels):
@@ -783,7 +795,7 @@ def run_approach_2(dotCal, cal, setup, make_plots=False):
             dot_idx,
             [("iToF", z_tof_arr), ("SL (triangulation)", z_sl_arr),
              ("ML fused", z_fus_arr)],
-            "Approach 2 – Gaussian ML fusion: iToF vs SL vs fused")
+            "Approach 2 – Gaussian ML fusion: iToF vs SL vs fused", limit=limit)
 
         figures["approach2_depth_overlay"] = _depth_overlay_fig(
             setup["sl_gray"],
@@ -835,7 +847,7 @@ def run_approach_2(dotCal, cal, setup, make_plots=False):
 # Approach 3: Active Brightness Trail (Microsoft-Paper §4.2, second approach)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def run_approach_3(dotCal, cal, setup, make_plots=False):
+def run_approach_3(dotCal, cal, setup, make_plots=False, limit = None):
     """AB peaks along each 1-D dot trail → min-ε peak (iToF resolves the
     ambiguity) → locally fitted quadratic subpixel → TRIANGULATED depth
     (read off the trail's 1/z parameterisation at the refined coordinate)."""
@@ -906,7 +918,7 @@ def run_approach_3(dotCal, cal, setup, make_plots=False):
         figures["approach3_depth_comparison"] = _depth_comparison_fig(
             [r["i"] for r in cands],
             [("Z_tri (Approach 3)", z_out_arr)],
-            "Approach 3 – Active Brightness: triangulated depth per dot")
+            "Approach 3 – Active Brightness: triangulated depth per dot", limit=limit)
 
         figures["approach3_depth_overlay"] = _depth_overlay_fig(
             setup["sl_gray"],
