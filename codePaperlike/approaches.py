@@ -640,7 +640,7 @@ def _eps_hist_fig(eps_all, threshold, title):
 # Approach 1: Consistency Error (Microsoft-Paper §4.2, first approach)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def run_approach_1(dotCal, cal, setup, make_plots=False,dot_sample = [], exclude = []):
+def run_approach_1(dotCal, cal, setup, make_plots=False, limit = None, dot_sample = [], exclude = []):
     """Pure trail scan — no dot localisation, no runtime triangulation.
 
     For every calibrated dot trail, the ToF depth image is resampled along the
@@ -703,7 +703,7 @@ def run_approach_1(dotCal, cal, setup, make_plots=False,dot_sample = [], exclude
         figures["approach1_depth_comparison"] = _depth_comparison_fig(
             [r["i"] for r in results],
             [("Z_out (ToF @ min-ε trail sample)", z_out_arr)],
-            "Approach 1 – Consistency error: selected ToF depth per dot")
+            "Approach 1 – Consistency error: selected ToF depth per dot", limit=limit)
 
         figures["approach1_depth_overlay"] = _depth_overlay_fig(
             setup["sl_gray"],
