@@ -53,6 +53,7 @@ CAMERAS = {
         K=K_SCHMERSAL_REAL,
         cal_blob=dict(max_sigma=10, num_sigma=10, min_sigma=10, threshold=0.05),
         pcd_glob="Pos*.pcd",
+        exclude=("Pos9",),
         dist_offset=0,
     ),
 
