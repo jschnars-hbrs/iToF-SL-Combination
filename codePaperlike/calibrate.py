@@ -58,16 +58,16 @@ CAMERAS = {
     ),
 
     "SchmersalRealCoherent": dict(
-        sl_cal=ROOT / "Pictures/Calibration/SchmersalReal/19.06/Coherent/SL",
-        tof_cal=ROOT / "Pictures/Calibration/SchmersalReal/19.06/Coherent/ToF",
+        sl_cal=ROOT / "Pictures/Calibration/SchmersalReal/30.09/SL",
+        tof_cal=ROOT / "Pictures/Calibration/SchmersalReal/30.09/ToF",
         K=K_SCHMERSAL_REAL,
-        cal_blob=dict(max_sigma=4, num_sigma=4, min_sigma=4, threshold=0.03),
+        cal_blob=dict(max_sigma=4, num_sigma=4, min_sigma=3, threshold=0.03),
         # ~1100 dots at ~15 px spacing, but the smaller dots only corrupt out to
         # ~3 px — so the ring is tighter than the sparse set's, not looser.
         tof_sample=dict(mode="annulus", r_in=4.0, r_out=6.5),
         pcd_glob="Pos*.pcd",
         exclude=("Pos9",),   # phase unwrapping fails on this frame
-        dist_offset=-266,
+        dist_offset=0,
     ),
 
 }
