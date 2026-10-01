@@ -66,7 +66,7 @@ CAMERAS = {
         # ~3 px — so the ring is tighter than the sparse set's, not looser.
         tof_sample=dict(mode="annulus", r_in=4.0, r_out=6.5),
         pcd_glob="Pos*.pcd",
-        exclude=("Pos9",),   # phase unwrapping fails on this frame
+        exclude=("Pos8","Pos9",),   # phase unwrapping fails on this frame
         dist_offset=0,
     ),
 
