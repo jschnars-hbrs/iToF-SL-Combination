@@ -30,8 +30,8 @@ DEFAULT_OUTPUT = Path("Pictures/Test/FlatWallSchmersalRealEXR")
 DEFAULT_INPUT = Path("/home/julian/Documents/Github/iToF-SL-Combination/Pictures/Calibration/SchmersalReal/30.09/ToF")
 DEFAULT_OUTPUT = Path("/home/julian/Documents/Github/iToF-SL-Combination/Pictures/Calibration/SchmersalReal/30.09/SL")
 
-DEFAULT_INPUT = Path("/home/julian/Documents/Github/iToF-SL-Combination/Pictures/Test/FlatWallSchmersalCoherent")
-DEFAULT_OUTPUT = DEFAULT_INPUT
+#DEFAULT_INPUT = Path("/home/julian/Documents/Github/iToF-SL-Combination/Pictures/Test/FlatWallSchmersalCoherent")
+#DEFAULT_OUTPUT = DEFAULT_INPUT
 
 
 # Channel name must match DotCalibration.SL_CHANNEL (codePaperlike/dot_calibration.py:28)
