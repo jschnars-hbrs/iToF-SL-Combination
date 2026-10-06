@@ -62,9 +62,10 @@ CAMERAS = {
         tof_cal=ROOT / "Pictures/Calibration/SchmersalReal/30.09/ToF",
         K=K_SCHMERSAL_REAL,
         cal_blob=dict(max_sigma=5, num_sigma=10, min_sigma=3, threshold=0.03),
-        # ~1100 dots at ~15 px spacing, but the smaller dots only corrupt out to
-        # ~3 px — so the ring is tighter than the sparse set's, not looser.
-        tof_sample=dict(mode="annulus", r_in=4.0, r_out=6.5),
+        # No annulus: unlike 19.06 the dot centres are not saturated here, and
+        # they give the flatter wall from 0.5 m on (plane RMS 3–8 mm vs. 4–20 mm
+        # for a 4–6.5 px ring, whose weak inter-dot signal gets noisy with
+        # distance). Old setting: tof_sample=dict(mode="annulus", r_in=4.0, r_out=6.5)
         pcd_glob="Pos*.pcd",
         exclude=("Pos8","Pos9",),   # phase unwrapping fails on this frame
         dist_offset=0,
