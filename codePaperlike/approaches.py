@@ -771,8 +771,11 @@ def run_approach_2(dotCal, cal, setup, make_plots=False, limit = None):
             r["z_fus"] = zt
             r["sigma_fus"] = r["sigma_tof"]
 
-    z_sl_arr = np.array([r["z_sl"] if r["valid"] else np.nan for r in cands])
-    z_tof_arr = np.array([r["z_tof"] if r["valid"] else np.nan for r in cands])
+    # Same ε-gate as the fusion above, so SL / iToF / joint stats share one dot set
+    gated = [(not r["valid"]) or
+             (EPS_THRESHOLD is not None and r["eps_best"] > EPS_THRESHOLD) for r in cands]
+    z_sl_arr = np.array([np.nan if g else r["z_sl"] for r, g in zip(cands, gated)])
+    z_tof_arr = np.array([np.nan if g else r["z_tof"] for r, g in zip(cands, gated)])
     z_fus_arr = np.array([r["z_fus"] for r in cands])
 
     print(f"Approach 2: {len(cands)} trails, "
