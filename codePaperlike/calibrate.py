@@ -124,10 +124,11 @@ def estimate_sigma_u_ab(dotCal, subpixel_list, trails, sl_paths, z_min):
     """Along-trail localisation noise [px] of the RUNTIME active-brightness
     estimator, measured on the calibration images themselves: for every
     calibration detection, run the 1-D trail pipeline (brightness resampling →
-    smoothing → peak → plateau-centred quadratic) and compare the refined
-    trail coordinate against the 2-D subpixel detection projected onto the
-    trail. This is the σ_u that belongs in σ_SL for Approach 2 — the 2-D GPR
-    calibration residual understates what the 1-D runtime estimator achieves.
+    smoothing → peak → plateau-centred quadratic → 2-D refinement) and
+    compare the refined trail coordinate against the 2-D subpixel detection
+    projected onto the trail. This is the σ_u that belongs in σ_SL for
+    Approach 2 — the 2-D GPR calibration residual understates what the
+    runtime estimator achieves.
     """
     import approaches
     import scipy.ndimage
@@ -172,7 +173,8 @@ def estimate_sigma_u_ab(dotCal, subpixel_list, trails, sl_paths, z_min):
             k0 = int(peaks[int(np.argmin(np.abs(peaks - k_det)))])
             if abs(k0 - k_det) > 20:
                 continue
-            k_sub = approaches.quad_subpixel(sig_s, k0)
+            k_sub, _ = approaches.refine_on_trail(
+                dotCal, img, trail, approaches.quad_subpixel(sig_s, k0))
             residuals.append(k_sub - k_det)
 
     if len(residuals) < 10:

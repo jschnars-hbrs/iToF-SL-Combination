@@ -77,6 +77,17 @@ SATURATION_LEVEL = None
 QUAD_HALF_WIN_MIN = 2
 QUAD_HALF_WIN_MAX = 40
 
+# Final subpixel step of Approaches 2/3. The trails are fitted to 2-D GPR dot
+# centres (calibration Step 1–2), so the runtime should measure the SAME
+# centre — the 1-D quadratic sees only a 3 px stripe and is biased on
+# speckly plateau dots and by neighbours on the trail.
+#   "fast2d" : vectorised stand-in for DotCalibration._gpr_peak (smoothing at
+#              the pinned RBF length scale + multi-level mask centroid), ~0.1 ms/dot
+#   "GPR"    : the calibration estimator itself (sklearn GP, tens of ms/dot)
+#   "quad1d" : 1-D quadratic only (previous behaviour)
+AB_SUBPIXEL_MODE = "fast2d"
+AB_PATCH_RADIUS = 6          # px half-size of the 2-D patch (≈ LoG radius of a dot)
+
 # Fallbacks when the calibration carries no measured noise data (legacy files).
 SIGMA_U_FALLBACK = 0.1       # px
 SIGMA_TOF_FALLBACK = lambda z: 0.005 + 0.002 * z  # m
@@ -404,6 +415,111 @@ def quad_subpixel(ab, k0):
     return float(k0)
 
 
+def fast_center_2d(patch, sigma_blob, oversample=4):
+    """Fast 2-D dot centre, mimicking DotCalibration._gpr_peak without the GP.
+
+    With its RBF length scale pinned at 0.35·σ_blob, the GP posterior mean is
+    essentially the patch smoothed at that scale; the local search is then
+    the mean of the above-threshold mask centroids at 0.35/0.5/0.65 of the
+    amplitude on a 4× oversampled grid. Unlike the GPR version the masks are
+    restricted to the connected component seeded near the patch centre, and
+    the amplitude is taken there, so a brighter neighbouring dot inside the
+    patch cannot pull the centre. Returns (x, y) relative to the patch.
+    """
+    h, w = patch.shape
+    I = np.asarray(patch, float)
+    I = np.where(np.isfinite(I), I, np.nan)
+    if h < 3 or w < 3 or not np.all(np.isfinite(I)):
+        return None
+    bg = float(np.percentile(I, 20))
+    amp = float(I.max() - bg)
+    if amp <= 0:
+        return None
+    I = np.clip((I - bg) / amp, 0.0, None)
+    ls = float(np.clip(0.35 * sigma_blob, 1.0, max(h, w)))
+    S = scipy.ndimage.gaussian_filter(I, ls, mode="nearest")
+    # order-1 zoom with grid_mode=False: fine sample i ↔ coarse i·(n−1)/(N−1),
+    # the same linspace grid _gpr_peak predicts on
+    Z = scipy.ndimage.zoom(S, oversample, order=1)
+    Hf, Wf = Z.shape
+    xs = np.linspace(0, w - 1, Wf)
+    ys = np.linspace(0, h - 1, Hf)
+
+    # seed: brightest fine sample in the central disc (the dot we were sent to)
+    gy, gx = np.meshgrid(ys, xs, indexing="ij")
+    cy, cx = (h - 1) / 2.0, (w - 1) / 2.0
+    central = (gx - cx) ** 2 + (gy - cy) ** 2 <= (0.5 * min(h, w)) ** 2
+    seed = np.unravel_index(int(np.argmax(np.where(central, Z, -np.inf))), Z.shape)
+    bg_m = float(np.percentile(Z, 10))
+    amp_m = float(Z[seed]) - bg_m
+    if amp_m <= 0:
+        return None
+
+    centroids = []
+    for level in (0.35, 0.5, 0.65):
+        lab, _ = scipy.ndimage.label(Z >= bg_m + level * amp_m)
+        comp = lab == lab[seed]
+        centroids.append((float(gx[comp].mean()), float(gy[comp].mean())))
+    c = np.mean(np.asarray(centroids), axis=0)
+    return float(c[0]), float(c[1])
+
+
+def refine_on_trail(dotCal, sl_gray, trail, k_coarse,
+                    mode=None, radius=None):
+    """2-D refinement of a trail position: measure the dot centre in a patch
+    around (u, v)(k_coarse) with the calibration's estimator and project it
+    orthogonally onto the trail.
+
+    Returns (k_sub, d_perp) — fractional trail coordinate and the centre's
+    perpendicular distance to the trail [px]. Falls back to (k_coarse, nan)
+    when the patch leaves the image or the centre is implausible (further
+    than `radius` from the start point: a neighbouring dot was caught).
+    """
+    mode = AB_SUBPIXEL_MODE if mode is None else mode
+    radius = AB_PATCH_RADIUS if radius is None else radius
+    if mode == "quad1d":
+        return float(k_coarse), np.nan
+
+    u, v = trail["u"], trail["v"]
+    n = len(u)
+    ks = np.arange(n, dtype=float)
+    u0 = float(np.interp(k_coarse, ks, u))
+    v0 = float(np.interp(k_coarse, ks, v))
+    H, W = sl_gray.shape[:2]
+    xc, yc = int(round(u0)), int(round(v0))
+    x0, x1 = xc - radius, xc + radius + 1
+    y0, y1 = yc - radius, yc + radius + 1
+    if x0 < 0 or y0 < 0 or x1 > W or y1 > H:
+        return float(k_coarse), np.nan
+    patch = sl_gray[y0:y1, x0:x1]
+    if patch.ndim == 3:
+        patch = patch.mean(axis=2)
+
+    sigma_blob = radius / np.sqrt(2.0)   # LoG radius = σ·√2, as in calibration
+    if mode == "GPR":
+        c = dotCal._gpr_peak(np.asarray(patch, float), sigma_blob=sigma_blob)
+    elif mode == "fast2d":
+        c = fast_center_2d(patch, sigma_blob)
+    else:
+        raise ValueError(f"Unknown AB_SUBPIXEL_MODE: {mode}")
+    if c is None:
+        return float(k_coarse), np.nan
+
+    # project onto the (straight) trail: local tangent, samples ~1 px apart
+    i = int(np.clip(np.floor(k_coarse), 0, n - 2))
+    t = np.array([u[i + 1] - u[i], v[i + 1] - v[i]], float)
+    step = float(np.hypot(*t))
+    if step < 1e-9:
+        return float(k_coarse), np.nan
+    t /= step
+    d = np.array([x0 + c[0] - u0, y0 + c[1] - v0])
+    along = float(d @ t)
+    d_perp = float(abs(d[0] * t[1] - d[1] * t[0]))
+    if abs(along) > radius or d_perp > radius:
+        return float(k_coarse), np.nan
+    return float(np.clip(k_coarse + along / step, 0, n - 1)), d_perp
+
+
 def sample_trail_brightness(sl_gray, trail, cross_half=AB_CROSS_HALF):
     """Resample active brightness along a trail (FL_C §4.2), averaging over
     ±cross_half px PERPENDICULAR to the trail direction — the paper integrates
@@ -436,15 +552,24 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
       2. find brightness peaks (relative prominence — trails intersect, so
          multiple peaks are expected),
       3. select the peak minimising the consistency error ε against iToF,
-      4. refine to a fractional trail coordinate with a locally fitted
-         quadratic and interpolate the subpixel image position,
+      4. refine to a fractional trail coordinate: locally fitted quadratic
+         as start point, then the 2-D dot centre (AB_SUBPIXEL_MODE, same
+         estimator as the calibration detections) projected onto the trail,
       5. read the depth off the trail parameterisation there (z = 1/w — every
          trail sample carries its representative triangulated depth).
 
     Returns one dict per calibrated dot (valid or not) with:
       i, valid, eps_best, k_best, k_sub, u_sub, v_sub, z_sl, z_tof, gain,
-      n_peaks (+ ab, ab_raw, peaks, eps_peaks if keep_curves)
+      d_perp, n_peaks (+ ab, ab_raw, peaks, eps_peaks if keep_curves)
     """
+    # Approaches 2 and 3 share this front-end — compute it once per setup.
+    # The callers add keys to the dicts, so hand out copies.
+    cache_key = (AB_SUBPIXEL_MODE, AB_PATCH_RADIUS, keep_curves, AB_SMOOTH_SIGMA,
+                 AB_CROSS_HALF, PEAK_PROMINENCE_FRAC, PEAK_MIN_DISTANCE)
+    cached = setup.get("_ab_cache", {}).get(cache_key)
+    if cached is not None:
+        return [dict(r) for r in cached]
+
     tof_sampler = setup["tof_sampler"]
     sl_gray = setup["sl_gray"]
 
@@ -459,7 +584,7 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
                               trail["v"][0] - trail["v"][-1]) / max(w_span, 1e-9))
         r = dict(i=i, valid=False, eps_best=np.inf, k_best=-1, k_sub=np.nan,
                  u_sub=np.nan, v_sub=np.nan, z_sl=np.nan, z_tof=np.nan,
-                 n_peaks=0, gain=gain)
+                 n_peaks=0, gain=gain, d_perp=np.nan)
         results.append(r)
 
         ab_raw = sample_trail_brightness(sl_gray, trail)
@@ -501,7 +626,8 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
             continue
         k0 = int(peaks[p_best])
 
-        k_sub = quad_subpixel(sig_s, k0)
+        k_sub, d_perp = refine_on_trail(dotCal, sl_gray, trail,
+                                        quad_subpixel(sig_s, k0))
         ks = np.arange(len(trail["u"]), dtype=float)
         u_sub = float(np.interp(k_sub, ks, trail["u"]))
         v_sub = float(np.interp(k_sub, ks, trail["v"]))
@@ -523,8 +649,9 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
 
         r.update(valid=True, eps_best=float(eps_ref), k_best=k0,
                  k_sub=float(k_sub), u_sub=u_sub, v_sub=v_sub,
-                 z_sl=z_sl, z_tof=z_tof)
-    return results
+                 z_sl=z_sl, z_tof=z_tof, d_perp=d_perp)
+    setup.setdefault("_ab_cache", {})[cache_key] = results
+    return [dict(r) for r in results]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
