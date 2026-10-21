@@ -28,6 +28,7 @@ from pathlib import Path
 import numpy as np
 import scipy.ndimage
 import scipy.signal
+from scipy.spatial import cKDTree
 
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
@@ -81,6 +82,36 @@ AB_AMBIGUITY_RATIO = 0.5
 AB_CROSS_HALF = 1            # ±px perpendicular averaging (paper: integrate
                              # "over the high intensity region of each dot",
                              # 3×3 kernel for sparse imaging)
+
+# Peak selection of Approaches 2/3.
+#   "min_eps": the peak with the smallest |ε| (+ weak-peak / ambiguity gates).
+#   "mpi"    : MPI only ever LENGTHENS the iToF path, so the true dot can sit in
+#              front of the iToF depth but not behind it. Among the peaks with
+#              −MPI_MAX_W ≤ r ≤ MPI_TOL_W (r = 1/Z_ToF − w_peak) the one nearest
+#              to the iToF is taken. min-|ε| fails once the MPI bias reaches half
+#              a dot pitch: on MPI_Test_2 (face, iToF ≈ 7 cm long) every dot lies
+#              between two hypotheses at r ≈ −0.7 and +0.7, and min-ε picks the
+#              wrong neighbour about half the time.
+#              A candidate also needs a real 2-D dot at the peak (DoG blob within
+#              BLOB_RADIUS — trail peaks between the dots are speckle/skirt) and a
+#              usable iToF there (robust local spread below TOF_MAD_MAX — on background
+#              noise ε is small by chance). The weak-peak / ambiguity gates and
+#              EPS_THRESHOLD are not used in this mode.
+AB_SELECT_MODE = "mpi"
+MPI_MAX_W = 1.2              # [1/m] max. iToF excess in 1/z (≈ 10 cm at 0.3 m)
+MPI_TOL_W = 0.05             # [1/m] tolerance behind the iToF (flat wall |ε| ≈ 0.02)
+BLOB_NOISE_K = 2.0           # DoG maximum must exceed this many σ of the DoG noise
+BLOB_RADIUS = 2.5            # px — trail peak ↔ blob assignment
+TOF_MAD_WIN = 5              # px — window of the robust iToF spread at the peak
+TOF_MAD_MAX = 0.05           # m — above: iToF unusable (dots p98 ≈ 3 cm,
+                             # background noise p5 ≈ 9 cm on MPI_Test)
+# Local consistency ("mpi" mode): the MPI bias varies smoothly over a surface,
+# so a dot whose selected residual is far from the median of its neighbours
+# (a missing true peak → the next dot in front was taken) is re-selected with
+# the neighbours' bias, or dropped.
+MPI_LOCAL_RADIUS = 40        # px
+MPI_LOCAL_MIN = 3            # neighbours needed for the check
+MPI_LOCAL_TOL = 0.3          # [1/m] ≈ a third of the dot pitch along a trail
 
 # Saturation level for the trail-based saturation correction (FL_C §4.2).
 # None = auto: integer images saturate at the dtype max, float (EXR) images
@@ -354,7 +385,65 @@ def common_setup(dotCal, cal, sl_path, tof_path):
         "sl_gray": sl_gray,
         "sat_level": sat_level,
         "H": H, "W": W,
+        "blob_tree": dot_blob_tree(sl_gray),
+        "tof_z": tof_depth_raster(tof_test, cal["K"], H, W),
     }
+
+
+def dot_blob_tree(sl_gray):
+    """KD-tree of the 2-D dot centres in the SL image: maxima of a DoG
+    (σ 1.5 / 5 px) above BLOB_NOISE_K · its robust noise. Peaks along a trail
+    that have no blob nearby are skirt / speckle between the dots."""
+    img = np.asarray(sl_gray, float)
+    if img.ndim == 3:
+        img = img.mean(axis=2)
+    img = np.where(np.isfinite(img), img, np.nanmedian(img))
+    dog = scipy.ndimage.gaussian_filter(img, 1.5) - scipy.ndimage.gaussian_filter(img, 5.0)
+    noise = 1.4826 * float(np.median(np.abs(dog - np.median(dog))))
+    peaks = (dog == scipy.ndimage.maximum_filter(dog, 7)) & (dog > BLOB_NOISE_K * noise)
+    vy, vx = np.nonzero(peaks)
+    return cKDTree(np.c_[vx, vy].astype(float)) if len(vx) else None
+
+
+def tof_depth_raster(tof_test, K, H, W):
+    """Axial iToF depth as an (H, W) image, NaN where there is no return."""
+    if "points_map" in tof_test and tof_test["points_map"].shape[:2] == (H, W):
+        Z = np.array(tof_test["points_map"][..., 2], float)
+    else:  # unorganised cloud: rasterise
+        P = np.asarray(tof_test["points_3d"], float)
+        P = P[np.all(np.isfinite(P), axis=1) & (P[:, 2] > 1e-6)]
+        uv = np.round(DotCalibration._project_to_pixels(P, K)).astype(int)
+        ok = (uv[:, 0] >= 0) & (uv[:, 0] < W) & (uv[:, 1] >= 0) & (uv[:, 1] < H)
+        Z = np.full((H, W), np.nan)
+        Z[uv[ok, 1], uv[ok, 0]] = P[ok, 2]
+    Z[~(Z > 1e-6)] = np.nan
+    return Z
+
+
+def tof_mad_at(Z, u, v):
+    """Robust spread (1.4826·MAD) of the iToF depth in a TOF_MAD_WIN window
+    around each pixel (u, v); +inf with fewer than 3 returns or off-image.
+    Small and median-based on purpose: the window sits on the bright dot
+    pixels, where the projector-lit iToF is best, and barely reaches across
+    an object edge into the background noise."""
+    H, W = Z.shape
+    h = TOF_MAD_WIN // 2
+    ui = np.round(np.asarray(u, float)).astype(int)
+    vi = np.round(np.asarray(v, float)).astype(int)
+    off = np.arange(-h, h + 1)
+    uu = ui[:, None, None] + off[None, None, :]
+    vv = vi[:, None, None] + off[None, :, None]
+    inside = (uu >= 0) & (uu < W) & (vv >= 0) & (vv < H)
+    patch = np.where(inside, Z[vv.clip(0, H - 1), uu.clip(0, W - 1)], np.nan)
+    patch = patch.reshape(len(ui), -1)
+    n = np.sum(np.isfinite(patch), axis=1)
+    out = np.full(len(ui), np.inf)
+    good = n >= 3
+    if np.any(good):
+        p = patch[good]
+        med = np.nanmedian(p, axis=1)
+        out[good] = 1.4826 * np.nanmedian(np.abs(p - med[:, None]), axis=1)
+    return out
 
 
 def tof_z_at(tof_sampler, u, v):
@@ -639,6 +728,18 @@ def weak_peak_rejected(r, sigma_tof_fn, max_sigma=None):
                 abs(r["z_sl"] - zt) <= max_sigma * sigma_tof_fn(zt))
 
 
+def ab_gated(r, sigma_tof_fn, weak_max_sigma=None):
+    """True if a front-end candidate is not used. In "mpi" mode the selection
+    itself is the gate (blob, iToF validity, one-sided MPI window); in
+    "min_eps" mode the symmetric EPS_THRESHOLD and the weak-peak check apply."""
+    if not r["valid"]:
+        return True
+    if AB_SELECT_MODE == "mpi":
+        return False
+    return (EPS_THRESHOLD is not None and r["eps_best"] > EPS_THRESHOLD) or \
+        weak_peak_rejected(r, sigma_tof_fn, weak_max_sigma)
+
+
 def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
     """Shared front-end of Approaches 2 and 3 (FL_C §4.2, second approach):
 
@@ -646,8 +747,10 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
          saturation-corrected),
       2. find brightness peaks against a local baseline (contrast + noise
          prominence — trails intersect, so multiple peaks are expected),
-      3. select the peak minimising the consistency error ε against iToF;
-         invalid if the runner-up is nearly as consistent (ambiguity gate),
+      3. select a peak (AB_SELECT_MODE): "mpi" — nearest admissible peak in
+         front of the iToF (2-D dot, usable iToF, one-sided window), then a
+         local consistency check against the neighbours; "min_eps" — the peak
+         minimising ε, invalid if the runner-up is nearly as consistent,
       4. refine to a fractional trail coordinate: locally fitted quadratic
          as start point, then the 2-D dot centre (AB_SUBPIXEL_MODE, same
          estimator as the calibration detections) projected onto the trail,
@@ -656,14 +759,16 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
 
     Returns one dict per calibrated dot (valid or not) with:
       i, valid, eps_best, k_best, k_sub, u_sub, v_sub, z_sl, z_tof, gain,
-      d_perp, n_peaks, ambiguous, weak_peak
-      (+ ab, ab_raw, peaks, eps_peaks if keep_curves)
+      d_perp, n_peaks, ambiguous, weak_peak, eps_signed, reject
+      (+ r_sel in "mpi" mode; + ab, ab_raw, peaks, eps_peaks if keep_curves)
     """
     # Approaches 2 and 3 share this front-end — compute it once per setup.
     # The callers add keys to the dicts, so hand out copies.
     cache_key = (AB_SUBPIXEL_MODE, AB_PATCH_RADIUS, keep_curves, AB_SMOOTH_SIGMA,
                  AB_CROSS_HALF, PEAK_MIN_DISTANCE, AB_BG_WIN, AB_MIN_CONTRAST,
-                 AB_NOISE_K, AB_AMBIGUITY_RATIO, AB_MAX_SHIFT)
+                 AB_NOISE_K, AB_AMBIGUITY_RATIO, AB_MAX_SHIFT, AB_SELECT_MODE,
+                 MPI_MAX_W, MPI_TOL_W, BLOB_RADIUS, TOF_MAD_WIN, TOF_MAD_MAX,
+                 MPI_LOCAL_RADIUS, MPI_LOCAL_MIN, MPI_LOCAL_TOL)
     cached = setup.get("_ab_cache", {}).get(cache_key)
     if cached is not None:
         return [dict(r) for r in cached]
@@ -671,7 +776,35 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
     tof_sampler = setup["tof_sampler"]
     sl_gray = setup["sl_gray"]
 
+    def refine(r, trail, sig_s, base, k0):
+        k_sub, d_perp = refine_on_trail(dotCal, sl_gray, trail,
+                                        quad_subpixel(sig_s, k0, baseline=base),
+                                        k_anchor=k0)
+        ks = np.arange(len(trail["u"]), dtype=float)
+        u_sub = float(np.interp(k_sub, ks, trail["u"]))
+        v_sub = float(np.interp(k_sub, ks, trail["v"]))
+
+        # Depth directly from the trail parameterisation (each trail sample
+        # has a known representative triangulated depth, FL_C §4.2) — unlike a
+        # pinhole triangulation of (u_sub, v_sub), this stays correct where
+        # real lens distortion bends the projection.
+        w_sub = float(np.interp(k_sub, ks, trail["w"]))
+        z_sl = 1.0 / w_sub if w_sub > 1e-9 else np.nan
+        z_tof = tof_z_at(tof_sampler, u_sub, v_sub)
+
+        # Gate on ε at the REFINED position: the coarse peak of a wide plateau
+        # can sit many samples from the dot centre even when the refined
+        # solution is perfectly consistent.
+        eps_ref = eps_signed = np.inf
+        if np.isfinite(z_sl) and z_sl > 1e-6 and np.isfinite(z_tof) and z_tof > 1e-6:
+            eps_signed = 1.0 / z_tof - 1.0 / z_sl
+            eps_ref = abs(eps_signed)
+        r.update(eps_best=float(eps_ref), eps_signed=float(eps_signed), k_best=k0,
+                 k_sub=float(k_sub), u_sub=u_sub, v_sub=v_sub,
+                 z_sl=z_sl, z_tof=z_tof, d_perp=d_perp)
+
     results = []
+    mpi_cands = {}   # results index → (admissible residuals, their peaks, trail, sig_s, base)
     for i, trail in enumerate(setup["trails"]):
         if trail is None:
             continue
@@ -683,7 +816,7 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
         r = dict(i=i, valid=False, eps_best=np.inf, k_best=-1, k_sub=np.nan,
                  u_sub=np.nan, v_sub=np.nan, z_sl=np.nan, z_tof=np.nan,
                  n_peaks=0, gain=gain, d_perp=np.nan, ambiguous=False,
-                 weak_peak=False)
+                 weak_peak=False, eps_signed=np.nan, reject=None)
         results.append(r)
 
         ab_raw = sample_trail_brightness(sl_gray, trail)
@@ -716,51 +849,75 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
         if keep_curves:
             r["eps_peaks"] = eps_pk
 
-        order = np.argsort(eps_pk)
-        p_best = int(order[0])
-        if not np.isfinite(eps_pk[p_best]):
-            continue
-        k0 = int(peaks[p_best])
-        # strong = the previous (global-prominence) criterion finds a peak at
-        # the same dot; a wide dot can split into several local peaks
-        strong_pk, _ = scipy.signal.find_peaks(
-            sig_s, prominence=PEAK_PROMINENCE_FRAC * float(sig_s.max()),
-            distance=PEAK_MIN_DISTANCE)
-        weak_peak = not np.any(np.abs(strong_pk - k0) <= AB_MAX_SHIFT)
-        # runner-up for the ambiguity gate: the best peak of ANOTHER dot, not
-        # a second local maximum within the same one
-        rivals = [p for p in order[1:] if abs(int(peaks[p]) - k0) > 2 * AB_MAX_SHIFT]
-        # only weak peaks: strong ones keep the previous min-ε behaviour
-        ambiguous = weak_peak and bool(rivals) and \
-            eps_pk[p_best] > AB_AMBIGUITY_RATIO * eps_pk[rivals[0]]
-
-        k_sub, d_perp = refine_on_trail(dotCal, sl_gray, trail,
-                                        quad_subpixel(sig_s, k0, baseline=base),
-                                        k_anchor=k0)
-        ks = np.arange(len(trail["u"]), dtype=float)
-        u_sub = float(np.interp(k_sub, ks, trail["u"]))
-        v_sub = float(np.interp(k_sub, ks, trail["v"]))
-
-        # Depth directly from the trail parameterisation (each trail sample
-        # has a known representative triangulated depth, FL_C §4.2) — unlike a
-        # pinhole triangulation of (u_sub, v_sub), this stays correct where
-        # real lens distortion bends the projection.
-        w_sub = float(np.interp(k_sub, ks, trail["w"]))
-        z_sl = 1.0 / w_sub if w_sub > 1e-9 else np.nan
-        z_tof = tof_z_at(tof_sampler, u_sub, v_sub)
-
-        # Gate on ε at the REFINED position: the coarse peak of a wide plateau
-        # can sit many samples from the dot centre even when the refined
-        # solution is perfectly consistent.
-        eps_ref = np.inf
-        if np.isfinite(z_sl) and z_sl > 1e-6 and np.isfinite(z_tof) and z_tof > 1e-6:
-            eps_ref = abs(1.0 / z_tof - 1.0 / z_sl)
+        if AB_SELECT_MODE == "mpi":
+            # signed residual: r < 0 → the peak lies in front of the iToF depth
+            r_pk = w_tof_pk - trail["w"][peaks]
+            blob = np.zeros(len(peaks), bool)
+            if setup.get("blob_tree") is not None:
+                d_blob, _ = setup["blob_tree"].query(
+                    np.c_[trail["u"][peaks], trail["v"][peaks]])
+                blob = d_blob <= BLOB_RADIUS
+            tof_ok = tof_mad_at(setup["tof_z"], trail["u"][peaks],
+                                trail["v"][peaks]) < TOF_MAD_MAX
+            in_win = np.isfinite(r_pk) & (r_pk >= -MPI_MAX_W) & (r_pk <= MPI_TOL_W)
+            ok = blob & tof_ok & in_win
+            r["reject"] = ("no_blob" if not blob.any() else
+                           "tof" if not (blob & tof_ok).any() else
+                           "mpi_window" if not ok.any() else None)
+            if not ok.any():
+                continue
+            # nearest admissible hypothesis in front of the iToF
+            p_best = int(np.flatnonzero(ok)[np.argmax(r_pk[ok])])
+            k0 = int(peaks[p_best])
+            weak_peak = ambiguous = False
+            r["r_sel"] = float(r_pk[p_best])
+            mpi_cands[len(results) - 1] = (r_pk[ok], peaks[ok], trail, sig_s, base)
+        else:
+            order = np.argsort(eps_pk)
+            p_best = int(order[0])
+            if not np.isfinite(eps_pk[p_best]):
+                continue
+            k0 = int(peaks[p_best])
+            # strong = the previous (global-prominence) criterion finds a peak at
+            # the same dot; a wide dot can split into several local peaks
+            strong_pk, _ = scipy.signal.find_peaks(
+                sig_s, prominence=PEAK_PROMINENCE_FRAC * float(sig_s.max()),
+                distance=PEAK_MIN_DISTANCE)
+            weak_peak = not np.any(np.abs(strong_pk - k0) <= AB_MAX_SHIFT)
+            # runner-up for the ambiguity gate: the best peak of ANOTHER dot, not
+            # a second local maximum within the same one
+            rivals = [p for p in order[1:] if abs(int(peaks[p]) - k0) > 2 * AB_MAX_SHIFT]
+            # only weak peaks: strong ones keep the previous min-ε behaviour
+            ambiguous = weak_peak and bool(rivals) and \
+                eps_pk[p_best] > AB_AMBIGUITY_RATIO * eps_pk[rivals[0]]
 
         r.update(valid=not ambiguous, ambiguous=bool(ambiguous),
-                 weak_peak=bool(weak_peak),
-                 eps_best=float(eps_ref), k_best=k0,
-                 k_sub=float(k_sub), u_sub=u_sub, v_sub=v_sub,
-                 z_sl=z_sl, z_tof=z_tof, d_perp=d_perp)
+                 weak_peak=bool(weak_peak))
+        refine(r, trail, sig_s, base, k0)
+
+    if mpi_cands:
+        # Local consistency of the selected residuals (MPI_LOCAL_*), against the
+        # first-pass selection of the neighbours.
+        idx = np.array(sorted(mpi_cands))
+        uv = np.array([(results[k]["u_sub"], results[k]["v_sub"]) for k in idx])
+        r_sel = np.array([results[k]["r_sel"] for k in idx])
+        tree = cKDTree(uv)
+        for n, k in enumerate(idx):
+            nb = [m for m in tree.query_ball_point(uv[n], MPI_LOCAL_RADIUS) if m != n]
+            if len(nb) < MPI_LOCAL_MIN:
+                continue
+            b = float(np.median(r_sel[nb]))
+            if abs(r_sel[n] - b) <= MPI_LOCAL_TOL:
+                continue
+            r_ok, pk_ok, trail, sig_s, base = mpi_cands[k]
+            m = int(np.argmin(np.abs(r_ok - b)))
+            r = results[k]
+            if abs(r_ok[m] - b) > MPI_LOCAL_TOL:
+                r.update(valid=False, reject="local")
+                continue
+            r["r_sel"] = float(r_ok[m])
+            refine(r, trail, sig_s, base, int(pk_ok[m]))
+
     setup.setdefault("_ab_cache", {})[cache_key] = results
     return [dict(r) for r in results]
 
@@ -986,8 +1143,7 @@ def run_approach_2(dotCal, cal, setup, make_plots=False, limit = None):
         r["sigma_tof"] = np.nan
         r["sigma_fus"] = np.nan
         r["conflict"] = False
-        if not r["valid"] or (EPS_THRESHOLD is not None and r["eps_best"] > EPS_THRESHOLD) \
-                or weak_peak_rejected(r, sigma_tof_fn, FUSION_MAX_SIGMA):
+        if ab_gated(r, sigma_tof_fn, FUSION_MAX_SIGMA):
             continue
         zs, zt = r["z_sl"], r["z_tof"]
         if not (np.isfinite(zs) and zs > 1e-6):
@@ -1017,9 +1173,7 @@ def run_approach_2(dotCal, cal, setup, make_plots=False, limit = None):
             r["sigma_fus"] = r["sigma_tof"]
 
     # Same ε-gate as the fusion above, so SL / iToF / joint stats share one dot set
-    gated = [(not r["valid"]) or
-             (EPS_THRESHOLD is not None and r["eps_best"] > EPS_THRESHOLD) or
-             weak_peak_rejected(r, sigma_tof_fn, FUSION_MAX_SIGMA) for r in cands]
+    gated = [ab_gated(r, sigma_tof_fn, FUSION_MAX_SIGMA) for r in cands]
     z_sl_arr = np.array([np.nan if g else r["z_sl"] for r, g in zip(cands, gated)])
     z_tof_arr = np.array([np.nan if g else r["z_tof"] for r, g in zip(cands, gated)])
     z_fus_arr = np.array([r["z_fus"] for r in cands])
@@ -1108,9 +1262,7 @@ def run_approach_3(dotCal, cal, setup, make_plots=False, limit = None):
     cands = ab_trail_candidates(dotCal, cal, setup, keep_curves=make_plots)
 
     for r in cands:
-        gated = (not r["valid"]) or \
-            (EPS_THRESHOLD is not None and r["eps_best"] > EPS_THRESHOLD) or \
-            weak_peak_rejected(r, sigma_tof_fn)
+        gated = ab_gated(r, sigma_tof_fn)
         r["Z_out"] = np.nan if gated else r["z_sl"]
 
     z_out_arr = np.array([r["Z_out"] for r in cands])
@@ -1118,9 +1270,16 @@ def run_approach_3(dotCal, cal, setup, make_plots=False, limit = None):
     n_peakless = sum(1 for r in cands if r["n_peaks"] == 0)
     n_ambiguous = sum(1 for r in cands if r["ambiguous"])
     n_invalid = int(np.sum(~np.isfinite(z_out_arr)))
-    print(f"Approach 3: {len(cands)} trails "
-          f"({n_peakless} without AB peaks, {n_ambiguous} ambiguous, "
-          f"{n_invalid} invalid in total after ε-gate)")
+    if AB_SELECT_MODE == "mpi":
+        n_rej = Counter(r.get("reject") for r in cands if r["n_peaks"] > 0)
+        print(f"Approach 3: {len(cands)} trails ({n_peakless} without AB peaks, "
+              f"{n_rej['no_blob']} without a 2-D dot, {n_rej['tof']} without usable iToF, "
+              f"{n_rej['mpi_window']} outside the MPI window, "
+              f"{n_rej['local']} inconsistent with their neighbours; {n_invalid} invalid in total)")
+    else:
+        print(f"Approach 3: {len(cands)} trails "
+              f"({n_peakless} without AB peaks, {n_ambiguous} ambiguous, "
+              f"{n_invalid} invalid in total after ε-gate)")
     print(f"  {_std_note(z_out_arr, 'Z_out (triangulated)')}")
 
     figures = {}
