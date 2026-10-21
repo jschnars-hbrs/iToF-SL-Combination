@@ -131,8 +131,6 @@ def estimate_sigma_u_ab(dotCal, subpixel_list, trails, sl_paths, z_min):
     runtime estimator achieves.
     """
     import approaches
-    import scipy.ndimage
-    import scipy.signal
 
     residuals = []
     for j, sl_p in enumerate(sl_paths):
@@ -164,17 +162,15 @@ def estimate_sigma_u_ab(dotCal, subpixel_list, trails, sl_paths, z_min):
             sig = np.where(np.isfinite(ab), ab, 0.0)
             if sig.max() <= 0:
                 continue
-            sig_s = scipy.ndimage.gaussian_filter1d(sig, approaches.AB_SMOOTH_SIGMA)
-            peaks, _ = scipy.signal.find_peaks(
-                sig_s, prominence=approaches.PEAK_PROMINENCE_FRAC * float(sig_s.max()),
-                distance=approaches.PEAK_MIN_DISTANCE)
+            sig_s, base, peaks = approaches.trail_peaks(sig)
             if len(peaks) == 0:
                 continue
             k0 = int(peaks[int(np.argmin(np.abs(peaks - k_det)))])
             if abs(k0 - k_det) > 20:
                 continue
             k_sub, _ = approaches.refine_on_trail(
-                dotCal, img, trail, approaches.quad_subpixel(sig_s, k0))
+                dotCal, img, trail, approaches.quad_subpixel(sig_s, k0, baseline=base),
+                k_anchor=k0)
             residuals.append(k_sub - k_det)
 
     if len(residuals) < 10:

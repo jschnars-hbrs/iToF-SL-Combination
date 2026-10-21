@@ -53,13 +53,31 @@ GT_DISTANCE = None  # Set automatically from SL filename (e.g. "SL_Flat_Wall_1.0
 # even with ToF noise + ~1 px SL localisation error (Δw ≈ δx/(f·‖B‖)).
 EPS_THRESHOLD = 0.1
 
-# Active-brightness peak finding along the 1-D trails (relative to each trail's
-# own maximum, so exposure/reflectivity independent). The signal is Gaussian-
+# Active-brightness peak finding along the 1-D trails. The signal is Gaussian-
 # smoothed first: dots appear as WIDE speckly plateaus along the trail, and
-# unsmoothed peak finding locks onto individual speckle grains.
-PEAK_PROMINENCE_FRAC = 0.05
+# unsmoothed peak finding locks onto individual speckle grains. Peaks are then
+# measured against a LOCAL baseline (running minimum, smoothed) — real images
+# carry a large offset (dark level, ambient), and on skin or dark surfaces the
+# dots have only a few % contrast, so a prominence relative to the trail's
+# absolute maximum misses them and the min-ε step picks a neighbouring dot.
 PEAK_MIN_DISTANCE = 3        # samples (~pixels along the trail)
+# Previous criterion (prominence relative to the trail's maximum). Peaks that
+# pass it are "strong" and treated as before; peaks found only by the local
+# criterion are "weak" and additionally have to agree with iToF within
+# WEAK_PEAK_MAX_SIGMA · σ_ToF (Approach 3; Approach 2 uses FUSION_MAX_SIGMA) — on the test sets the extra weak
+# peaks are mostly noise at far range, where the ε gate in 1/m is very loose
+# and σ_SL (∝ z²) too large to reject them.
+PEAK_PROMINENCE_FRAC = 0.05
+WEAK_PEAK_MAX_SIGMA = 3.0
 AB_SMOOTH_SIGMA = 2.0        # samples — speckle suppression before find_peaks
+AB_BG_WIN = 21               # samples — local baseline window (> dot width,
+                             # < 2× dot pitch along the trail)
+AB_MIN_CONTRAST = 0.01       # peak prominence ≥ this fraction of the local baseline
+AB_NOISE_K = 3.0             # … and ≥ this many σ of the smoothed signal's noise
+# Ambiguity gate: the selected peak must be clearly closer to the iToF depth
+# than the runner-up (ε_best ≤ ratio · ε_second), else the dot is invalid —
+# with an inaccurate iToF (MPI, skin) a peak half a dot pitch away is a coin flip.
+AB_AMBIGUITY_RATIO = 0.5
 AB_CROSS_HALF = 1            # ±px perpendicular averaging (paper: integrate
                              # "over the high intensity region of each dot",
                              # 3×3 kernel for sparse imaging)
@@ -76,6 +94,9 @@ SATURATION_LEVEL = None
 # a narrow one.
 QUAD_HALF_WIN_MIN = 2
 QUAD_HALF_WIN_MAX = 40
+# The refined position may move at most this far from the detected peak —
+# a plateau merging into a neighbouring dot must not drag the vertex away.
+AB_MAX_SHIFT = 4             # samples
 
 # Final subpixel step of Approaches 2/3. The trails are fitted to 2-D GPR dot
 # centres (calibration Step 1–2), so the runtime should measure the SAME
@@ -92,6 +113,17 @@ AB_PATCH_RADIUS = 6          # px half-size of the 2-D patch (≈ LoG radius of 
 SIGMA_U_FALLBACK = 0.1       # px
 SIGMA_TOF_FALLBACK = lambda z: 0.005 + 0.002 * z  # m
 SIGMA_FLOOR = 1e-4           # m — avoids zero variances on noise-free sims
+# Lower bound on the runtime localisation noise σ_u. The calibration measures
+# it on high-contrast flat walls (~0.05 px); on test scenes the along-trail
+# residual is 0.2–0.5 px (flat-wall test set) and worse on skin, so without a
+# floor σ_SL is ~5× too optimistic and the fusion ignores iToF entirely.
+# 0.2 px: best on the real + simulated flat-wall regression (0.3 over-weights
+# iToF at mid range on the simulation).
+SIGMA_U_FLOOR = 0.2          # px
+# Consistency check: if SL and iToF disagree by more than this many combined σ,
+# they cannot both be right — Approach 2 does not fuse such dots. 6σ: lower
+# values also drop correct dots (flat-wall regression, real and simulated).
+FUSION_MAX_SIGMA = 6.0
 
 
 def _parse_gt_distance(sl_path):
@@ -190,6 +222,7 @@ def sigma_models(cal):
     if sigma_u is None or not np.isfinite(sigma_u) or sigma_u <= 0:
         print(f"  (calibration has no sigma_u — using fallback {SIGMA_U_FALLBACK} px)")
         sigma_u = SIGMA_U_FALLBACK
+    sigma_u = max(float(sigma_u), SIGMA_U_FLOOR)
 
     mode = cal.get("mode", cal.get("metadata", {}).get("mode", "x"))
     K = cal["K"]
@@ -363,11 +396,24 @@ def scan_trail(trail, tof_sampler):
     return Z_tof, eps
 
 
-def plateau_bounds(sig, k0, rel_level=0.5):
+def local_baseline(sig, win=None):
+    """Running background of a trail signal: windowed minimum, then a box
+    mean of the same width so the baseline follows slow shading but not dots."""
+    win = AB_BG_WIN if win is None else win
+    return scipy.ndimage.uniform_filter1d(
+        scipy.ndimage.minimum_filter1d(sig, win, mode="nearest"), win, mode="nearest")
+
+
+def plateau_bounds(sig, k0, rel_level=0.5, baseline=None):
     """(lo, hi) sample bounds of the contiguous region around k0 that stays
-    above rel_level of the local amplitude — the dot's extent along the trail."""
+    above rel_level of the local amplitude — the dot's extent along the trail.
+    `baseline` is the local background (array or scalar); default: the
+    trail's 20th percentile."""
     n = len(sig)
-    bg = float(np.percentile(sig, 20))
+    if baseline is None:
+        bg = float(np.percentile(sig, 20))
+    else:
+        bg = float(np.broadcast_to(baseline, np.shape(sig))[k0])
     thr = bg + rel_level * (float(sig[k0]) - bg)
     lo = k0
     while lo > 0 and sig[lo - 1] >= thr and k0 - lo < QUAD_HALF_WIN_MAX:
@@ -378,7 +424,7 @@ def plateau_bounds(sig, k0, rel_level=0.5):
     return lo, hi
 
 
-def quad_subpixel(ab, k0):
+def quad_subpixel(ab, k0, baseline=None, max_shift=None):
     """1-D subpixel refinement of an AB peak with a locally fitted quadratic
     (FL_C §4.2: "the stationary point of a locally fitted quadratic in 1D").
 
@@ -386,10 +432,12 @@ def quad_subpixel(ab, k0):
     above-half-maximum region around k0 is extended by half its width on both
     sides so the quadratic sees the falling edges — for wide flat-top dots the
     interior is uninformative and a peak-centred window would bias the vertex.
+    The result is clipped to k0 ± max_shift (default AB_MAX_SHIFT).
     Returns the fractional trail-sample coordinate.
     """
     n = len(ab)
-    lo, hi = plateau_bounds(ab, k0)
+    max_shift = AB_MAX_SHIFT if max_shift is None else max_shift
+    lo, hi = plateau_bounds(ab, k0, baseline=baseline)
     margin = max(QUAD_HALF_WIN_MIN, (hi - lo + 1) // 2)
     centre = 0.5 * (lo + hi)
     # SYMMETRIC window around the plateau centre: a window clipped by the
@@ -405,7 +453,9 @@ def quad_subpixel(ab, k0):
     if np.sum(m) >= 3:
         a, b, _ = np.polyfit(xs[m], ys[m], 2)
         if a < -1e-15:
-            return centre + float(np.clip(-b / (2.0 * a), -half_span, half_span))
+            k = centre + float(np.clip(-b / (2.0 * a), -half_span, half_span))
+            if abs(k - k0) <= max_shift:
+                return k
     # 3-point parabola fallback around the raw peak
     if 0 < k0 < n - 1 and np.all(np.isfinite(ab[k0 - 1:k0 + 2])):
         y_m, y_0, y_p = ab[k0 - 1], ab[k0], ab[k0 + 1]
@@ -465,7 +515,7 @@ def fast_center_2d(patch, sigma_blob, oversample=4):
 
 
 def refine_on_trail(dotCal, sl_gray, trail, k_coarse,
-                    mode=None, radius=None):
+                    mode=None, radius=None, k_anchor=None):
     """2-D refinement of a trail position: measure the dot centre in a patch
     around (u, v)(k_coarse) with the calibration's estimator and project it
     orthogonally onto the trail.
@@ -473,7 +523,8 @@ def refine_on_trail(dotCal, sl_gray, trail, k_coarse,
     Returns (k_sub, d_perp) — fractional trail coordinate and the centre's
     perpendicular distance to the trail [px]. Falls back to (k_coarse, nan)
     when the patch leaves the image or the centre is implausible (further
-    than `radius` from the start point: a neighbouring dot was caught).
+    than `radius` from the start point, or than AB_MAX_SHIFT from `k_anchor`
+    — the detected peak: a neighbouring dot was caught).
     """
     mode = AB_SUBPIXEL_MODE if mode is None else mode
     radius = AB_PATCH_RADIUS if radius is None else radius
@@ -515,9 +566,11 @@ def refine_on_trail(dotCal, sl_gray, trail, k_coarse,
     d = np.array([x0 + c[0] - u0, y0 + c[1] - v0])
     along = float(d @ t)
     d_perp = float(abs(d[0] * t[1] - d[1] * t[0]))
-    if abs(along) > radius or d_perp > radius:
+    k_sub = k_coarse + along / step
+    if abs(along) > radius or d_perp > radius or \
+            (k_anchor is not None and abs(k_sub - k_anchor) > AB_MAX_SHIFT):
         return float(k_coarse), np.nan
-    return float(np.clip(k_coarse + along / step, 0, n - 1)), d_perp
+    return float(np.clip(k_sub, 0, n - 1)), d_perp
 
 
 def sample_trail_brightness(sl_gray, trail, cross_half=AB_CROSS_HALF):
@@ -544,14 +597,57 @@ def sample_trail_brightness(sl_gray, trail, cross_half=AB_CROSS_HALF):
     return out
 
 
+def trail_peaks(sig):
+    """Dot candidates along one trail brightness vector (NaN-free).
+
+    Returns (sig_s, baseline, peaks): the smoothed signal, its local
+    baseline, and the peak sample indices. A peak must stand out from the
+    local baseline by AB_MIN_CONTRAST of the baseline AND by AB_NOISE_K σ of
+    the smoothed noise.
+    """
+    sig_s = scipy.ndimage.gaussian_filter1d(sig, AB_SMOOTH_SIGMA)
+    base = local_baseline(sig_s)
+    # noise of the smoothed signal: MAD of the speckle residual, scaled by
+    # the Gaussian filter's white-noise gain 1/sqrt(2·sqrt(π)·σ)
+    resid = sig - sig_s
+    noise = 1.4826 * float(np.median(np.abs(resid - np.median(resid)))) \
+        / np.sqrt(2.0 * np.sqrt(np.pi) * AB_SMOOTH_SIGMA)
+    min_prom = max(AB_MIN_CONTRAST * float(np.median(base)), AB_NOISE_K * noise)
+    peaks, _ = scipy.signal.find_peaks(
+        sig_s - base, prominence=min_prom, distance=PEAK_MIN_DISTANCE)
+    return sig_s, base, peaks
+
+
+def sl_tof_conflict(z_sl, z_tof, gain, sigma_sl_fn, sigma_tof_fn):
+    """True if SL and iToF depths disagree by more than FUSION_MAX_SIGMA
+    combined σ (False if either depth is missing)."""
+    if not (np.isfinite(z_sl) and z_sl > 1e-6 and np.isfinite(z_tof) and z_tof > 1e-6):
+        return False
+    sigma = np.hypot(sigma_sl_fn(z_sl, gain), sigma_tof_fn(z_tof))
+    return abs(z_sl - z_tof) > FUSION_MAX_SIGMA * sigma
+
+
+def weak_peak_rejected(r, sigma_tof_fn, max_sigma=None):
+    """True if the dot comes from a weak AB peak that does not agree with
+    iToF within max_sigma · σ_ToF (default WEAK_PEAK_MAX_SIGMA, see
+    PEAK_PROMINENCE_FRAC)."""
+    if not r["weak_peak"]:
+        return False
+    max_sigma = WEAK_PEAK_MAX_SIGMA if max_sigma is None else max_sigma
+    zt = r["z_tof"]
+    return not (np.isfinite(zt) and
+                abs(r["z_sl"] - zt) <= max_sigma * sigma_tof_fn(zt))
+
+
 def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
     """Shared front-end of Approaches 2 and 3 (FL_C §4.2, second approach):
 
       1. resample active brightness along each dot trail (1-D vector,
          saturation-corrected),
-      2. find brightness peaks (relative prominence — trails intersect, so
-         multiple peaks are expected),
-      3. select the peak minimising the consistency error ε against iToF,
+      2. find brightness peaks against a local baseline (contrast + noise
+         prominence — trails intersect, so multiple peaks are expected),
+      3. select the peak minimising the consistency error ε against iToF;
+         invalid if the runner-up is nearly as consistent (ambiguity gate),
       4. refine to a fractional trail coordinate: locally fitted quadratic
          as start point, then the 2-D dot centre (AB_SUBPIXEL_MODE, same
          estimator as the calibration detections) projected onto the trail,
@@ -560,12 +656,14 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
 
     Returns one dict per calibrated dot (valid or not) with:
       i, valid, eps_best, k_best, k_sub, u_sub, v_sub, z_sl, z_tof, gain,
-      d_perp, n_peaks (+ ab, ab_raw, peaks, eps_peaks if keep_curves)
+      d_perp, n_peaks, ambiguous, weak_peak
+      (+ ab, ab_raw, peaks, eps_peaks if keep_curves)
     """
     # Approaches 2 and 3 share this front-end — compute it once per setup.
     # The callers add keys to the dicts, so hand out copies.
     cache_key = (AB_SUBPIXEL_MODE, AB_PATCH_RADIUS, keep_curves, AB_SMOOTH_SIGMA,
-                 AB_CROSS_HALF, PEAK_PROMINENCE_FRAC, PEAK_MIN_DISTANCE)
+                 AB_CROSS_HALF, PEAK_MIN_DISTANCE, AB_BG_WIN, AB_MIN_CONTRAST,
+                 AB_NOISE_K, AB_AMBIGUITY_RATIO, AB_MAX_SHIFT)
     cached = setup.get("_ab_cache", {}).get(cache_key)
     if cached is not None:
         return [dict(r) for r in cached]
@@ -584,7 +682,8 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
                               trail["v"][0] - trail["v"][-1]) / max(w_span, 1e-9))
         r = dict(i=i, valid=False, eps_best=np.inf, k_best=-1, k_sub=np.nan,
                  u_sub=np.nan, v_sub=np.nan, z_sl=np.nan, z_tof=np.nan,
-                 n_peaks=0, gain=gain, d_perp=np.nan)
+                 n_peaks=0, gain=gain, d_perp=np.nan, ambiguous=False,
+                 weak_peak=False)
         results.append(r)
 
         ab_raw = sample_trail_brightness(sl_gray, trail)
@@ -598,11 +697,7 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
             continue
         # Dots appear as wide speckle plateaus along the trail — smooth before
         # peak finding, or the peaks lock onto individual speckle grains.
-        sig_s = scipy.ndimage.gaussian_filter1d(sig, AB_SMOOTH_SIGMA)
-
-        peaks, _ = scipy.signal.find_peaks(
-            sig_s, prominence=PEAK_PROMINENCE_FRAC * float(sig_s.max()),
-            distance=PEAK_MIN_DISTANCE)
+        sig_s, base, peaks = trail_peaks(sig)
         r["n_peaks"] = len(peaks)
         if keep_curves:
             r["ab"] = sig_s
@@ -621,13 +716,27 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
         if keep_curves:
             r["eps_peaks"] = eps_pk
 
-        p_best = int(np.argmin(eps_pk))
+        order = np.argsort(eps_pk)
+        p_best = int(order[0])
         if not np.isfinite(eps_pk[p_best]):
             continue
         k0 = int(peaks[p_best])
+        # strong = the previous (global-prominence) criterion finds a peak at
+        # the same dot; a wide dot can split into several local peaks
+        strong_pk, _ = scipy.signal.find_peaks(
+            sig_s, prominence=PEAK_PROMINENCE_FRAC * float(sig_s.max()),
+            distance=PEAK_MIN_DISTANCE)
+        weak_peak = not np.any(np.abs(strong_pk - k0) <= AB_MAX_SHIFT)
+        # runner-up for the ambiguity gate: the best peak of ANOTHER dot, not
+        # a second local maximum within the same one
+        rivals = [p for p in order[1:] if abs(int(peaks[p]) - k0) > 2 * AB_MAX_SHIFT]
+        # only weak peaks: strong ones keep the previous min-ε behaviour
+        ambiguous = weak_peak and bool(rivals) and \
+            eps_pk[p_best] > AB_AMBIGUITY_RATIO * eps_pk[rivals[0]]
 
         k_sub, d_perp = refine_on_trail(dotCal, sl_gray, trail,
-                                        quad_subpixel(sig_s, k0))
+                                        quad_subpixel(sig_s, k0, baseline=base),
+                                        k_anchor=k0)
         ks = np.arange(len(trail["u"]), dtype=float)
         u_sub = float(np.interp(k_sub, ks, trail["u"]))
         v_sub = float(np.interp(k_sub, ks, trail["v"]))
@@ -647,7 +756,9 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
         if np.isfinite(z_sl) and z_sl > 1e-6 and np.isfinite(z_tof) and z_tof > 1e-6:
             eps_ref = abs(1.0 / z_tof - 1.0 / z_sl)
 
-        r.update(valid=True, eps_best=float(eps_ref), k_best=k0,
+        r.update(valid=not ambiguous, ambiguous=bool(ambiguous),
+                 weak_peak=bool(weak_peak),
+                 eps_best=float(eps_ref), k_best=k0,
                  k_sub=float(k_sub), u_sub=u_sub, v_sub=v_sub,
                  z_sl=z_sl, z_tof=z_tof, d_perp=d_perp)
     setup.setdefault("_ab_cache", {})[cache_key] = results
@@ -862,7 +973,9 @@ def run_approach_2(dotCal, cal, setup, make_plots=False, limit = None):
       d_ToF ~ N(z_tof, σ_ToF²) with σ_ToF(z) from the flat-wall noise table
 
     The joint likelihood is the product of the two Gaussians; its maximum (the
-    precision-weighted mean) is the fused depth.
+    precision-weighted mean) is the fused depth. If the two disagree by more
+    than FUSION_MAX_SIGMA combined σ (MPI-biased iToF, wrong peak), they
+    cannot both be right and the dot gets no fused depth (r["conflict"]).
     """
     sigma_u, sigma_sl_fn, sigma_tof_fn = sigma_models(cal)
     cands = ab_trail_candidates(dotCal, cal, setup, keep_curves=make_plots)
@@ -872,7 +985,9 @@ def run_approach_2(dotCal, cal, setup, make_plots=False, limit = None):
         r["sigma_sl"] = np.nan
         r["sigma_tof"] = np.nan
         r["sigma_fus"] = np.nan
-        if not r["valid"] or (EPS_THRESHOLD is not None and r["eps_best"] > EPS_THRESHOLD):
+        r["conflict"] = False
+        if not r["valid"] or (EPS_THRESHOLD is not None and r["eps_best"] > EPS_THRESHOLD) \
+                or weak_peak_rejected(r, sigma_tof_fn, FUSION_MAX_SIGMA):
             continue
         zs, zt = r["z_sl"], r["z_tof"]
         if not (np.isfinite(zs) and zs > 1e-6):
@@ -886,6 +1001,9 @@ def run_approach_2(dotCal, cal, setup, make_plots=False, limit = None):
 
         if np.isfinite(zs) and np.isfinite(zt):
             ss, st = r["sigma_sl"], r["sigma_tof"]
+            if sl_tof_conflict(zs, zt, r.get("gain"), sigma_sl_fn, sigma_tof_fn):
+                r["conflict"] = True
+                continue
             # Maximum of the product of two Gaussians = precision-weighted mean
             # (equals the argmax of the ±3σ candidate grid, cf. Agresti eq. 16).
             prec = 1.0 / ss ** 2 + 1.0 / st ** 2
@@ -900,13 +1018,16 @@ def run_approach_2(dotCal, cal, setup, make_plots=False, limit = None):
 
     # Same ε-gate as the fusion above, so SL / iToF / joint stats share one dot set
     gated = [(not r["valid"]) or
-             (EPS_THRESHOLD is not None and r["eps_best"] > EPS_THRESHOLD) for r in cands]
+             (EPS_THRESHOLD is not None and r["eps_best"] > EPS_THRESHOLD) or
+             weak_peak_rejected(r, sigma_tof_fn, FUSION_MAX_SIGMA) for r in cands]
     z_sl_arr = np.array([np.nan if g else r["z_sl"] for r, g in zip(cands, gated)])
     z_tof_arr = np.array([np.nan if g else r["z_tof"] for r, g in zip(cands, gated)])
     z_fus_arr = np.array([r["z_fus"] for r in cands])
 
+    n_conflict = sum(r["conflict"] for r in cands)
     print(f"Approach 2: {len(cands)} trails, "
-          f"{int(np.sum(np.isfinite(z_fus_arr)))} fused depths")
+          f"{int(np.sum(np.isfinite(z_fus_arr)))} fused depths "
+          f"({n_conflict} SL/iToF conflicts > {FUSION_MAX_SIGMA:g}σ not fused)")
     print(f"  {_std_note(z_sl_arr, 'SL (triangulated)')}")
     print(f"  {_std_note(z_tof_arr, 'iToF')}")
     print(f"  {_std_note(z_fus_arr, 'Joint likelihood')}")
@@ -980,20 +1101,26 @@ def run_approach_2(dotCal, cal, setup, make_plots=False, limit = None):
 def run_approach_3(dotCal, cal, setup, make_plots=False, limit = None):
     """AB peaks along each 1-D dot trail → min-ε peak (iToF resolves the
     ambiguity) → locally fitted quadratic subpixel → TRIANGULATED depth
-    (read off the trail's 1/z parameterisation at the refined coordinate)."""
+    (read off the trail's 1/z parameterisation at the refined coordinate).
+    Dots from a weak AB peak must also agree with iToF within
+    WEAK_PEAK_MAX_SIGMA · σ_ToF."""
+    _, _, sigma_tof_fn = sigma_models(cal)
     cands = ab_trail_candidates(dotCal, cal, setup, keep_curves=make_plots)
 
     for r in cands:
         gated = (not r["valid"]) or \
-            (EPS_THRESHOLD is not None and r["eps_best"] > EPS_THRESHOLD)
+            (EPS_THRESHOLD is not None and r["eps_best"] > EPS_THRESHOLD) or \
+            weak_peak_rejected(r, sigma_tof_fn)
         r["Z_out"] = np.nan if gated else r["z_sl"]
 
     z_out_arr = np.array([r["Z_out"] for r in cands])
     eps_all = np.array([r["eps_best"] for r in cands], float)
     n_peakless = sum(1 for r in cands if r["n_peaks"] == 0)
+    n_ambiguous = sum(1 for r in cands if r["ambiguous"])
     n_invalid = int(np.sum(~np.isfinite(z_out_arr)))
     print(f"Approach 3: {len(cands)} trails "
-          f"({n_peakless} without AB peaks, {n_invalid} invalid after ε-gate)")
+          f"({n_peakless} without AB peaks, {n_ambiguous} ambiguous, "
+          f"{n_invalid} invalid in total after ε-gate)")
     print(f"  {_std_note(z_out_arr, 'Z_out (triangulated)')}")
 
     figures = {}
