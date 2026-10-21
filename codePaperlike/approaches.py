@@ -123,7 +123,7 @@ SIGMA_U_FLOOR = 0.2          # px
 # Consistency check: if SL and iToF disagree by more than this many combined σ,
 # they cannot both be right — Approach 2 does not fuse such dots. 6σ: lower
 # values also drop correct dots (flat-wall regression, real and simulated).
-FUSION_MAX_SIGMA = 6.0
+FUSION_MAX_SIGMA = 20.0
 
 
 def _parse_gt_distance(sl_path):
