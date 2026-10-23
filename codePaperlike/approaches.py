@@ -155,6 +155,10 @@ SIGMA_U_FLOOR = 0.2          # px
 # they cannot both be right — Approach 2 does not fuse such dots. 6σ: lower
 # values also drop correct dots (flat-wall regression, real and simulated).
 FUSION_MAX_SIGMA = 20.0
+# Multipath only lengthens the iToF range, and σ_ToF (flat-wall noise table) does not know about
+# it. True → the iToF loses weight as far as it lies BEHIND the SL depth:
+# σ_ToF,eff² = σ_ToF² + max(0, z_ToF − z_SL)²  (MPI_A2_analysis_v11: 33x33 corners 55 → 25 mm RMSE).
+FUSION_MPI_SIGMA = True
 
 
 def _parse_gt_distance(sl_path):
@@ -1156,8 +1160,11 @@ def run_approach_2(dotCal, cal, setup, make_plots=False, limit = None):
             r["sigma_tof"] = sigma_tof_fn(zt)
 
         if np.isfinite(zs) and np.isfinite(zt):
+            if FUSION_MPI_SIGMA:
+                r["sigma_tof"] = float(np.hypot(r["sigma_tof"], max(0.0, zt - zs)))
             ss, st = r["sigma_sl"], r["sigma_tof"]
-            if sl_tof_conflict(zs, zt, r.get("gain"), sigma_sl_fn, sigma_tof_fn):
+            tof_fn = (lambda z, s=st: s) if FUSION_MPI_SIGMA else sigma_tof_fn
+            if sl_tof_conflict(zs, zt, r.get("gain"), sigma_sl_fn, tof_fn):
                 r["conflict"] = True
                 continue
             # Maximum of the product of two Gaussians = precision-weighted mean

@@ -71,6 +71,28 @@ CAMERAS = {
         dist_offset=0,
     ),
 
+    # PCDs made from RAW with the v1.1 iToF calibrations (itofcameracalibration_new,
+    # utils/raw2pcd_calibration.py): 10 frames averaged, unwrapped with the known wall
+    # distance. The file names carry the geometric ground truth Z = LDS + offset
+    # (dot parallax: 25.08 +80 mm, 30.09 DotTrail +90 mm), so no logbook table is needed.
+    "SchmersalReal_v11": dict(
+        sl_cal=ROOT / "Pictures/Calibration/SchmersalReal/25.08_v11/SL",
+        tof_cal=ROOT / "Pictures/Calibration/SchmersalReal/25.08_v11/ToF",
+        K=K_SCHMERSAL_REAL,
+        cal_blob=dict(max_sigma=10, num_sigma=10, min_sigma=10, threshold=0.05),
+        pcd_glob="ToF_*m.pcd",
+        dist_offset=0,
+    ),
+
+    "SchmersalRealCoherent_v11": dict(
+        sl_cal=ROOT / "Pictures/Calibration/SchmersalReal/30.09_v11/SL",
+        tof_cal=ROOT / "Pictures/Calibration/SchmersalReal/30.09_v11/ToF",
+        K=K_SCHMERSAL_REAL,
+        cal_blob=dict(max_sigma=5, num_sigma=10, min_sigma=3, threshold=0.03),
+        pcd_glob="ToF_*m.pcd",
+        dist_offset=0,
+    ),
+
 }
 
 
