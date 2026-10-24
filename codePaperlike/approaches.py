@@ -19,6 +19,7 @@ import scipy.ndimage
 import scipy.signal
 from scipy.spatial import cKDTree
 
+import overrides
 from dot_calibration import DotCalibration, ToFSampler
 
 CONNECT_DOTS = True             # connect dots with lines in the depth comparison plots
@@ -62,6 +63,8 @@ SIGMA_U_FLOOR = 0.2                               # px, lower bound on the runti
 FUSION_MAX_SIGMA = 20.0         # SL and iToF further apart than this many σ are not fused
 FUSION_MPI_SIGMA = True         # inflate σ_ToF by how far the iToF lies behind the SL depth
 FUSION_MPI_NSIGMA = 3.0         # … only beyond this many combined σ
+
+overrides.apply(globals())      # GUI values for the constants above (no-op without $ITOF_OVERRIDES)
 
 
 def _nan_for_none(obj):
@@ -202,10 +205,16 @@ def ensure_trails(dotCal, cal, image_shape):
 
 
 def common_setup(dotCal, cal, sl_path, tof_path):
-    """Load the test SL image and ToF cloud and everything the approaches share."""
+    """Load the test SL image and ToF cloud and everything the approaches share; sl_path None: SL image from the PCD's gray values."""
     tof_test = dotCal.load_tof_pcd(tof_path, unit_scale=cal.get("metadata", {}).get("pcd_unit_scale", 0.001),
                                    depth_mode="axial")
-    sl_gray = dotCal.read_image(sl_path)
+    if sl_path is None:
+        if "intensity_map" not in tof_test:
+            raise ValueError(f"No SL image given and {tof_path} is not an organized cloud with gray values")
+        print("SL image: gray values of the ToF cloud (no EXR given)")
+        sl_gray = tof_test["intensity_map"].astype(np.float32)
+    else:
+        sl_gray = dotCal.read_image(sl_path)
     H, W = sl_gray.shape[:2]
     trails = ensure_trails(dotCal, cal, (H, W))
     print(f"Trails: {sum(t is not None for t in trails)} / {len(trails)} dots calibrated "
@@ -944,7 +953,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--calibration", required=True, help="calibration.json")
     p.add_argument("--approaches", nargs="+", required=True, help="1 2 3 or 'all'")
-    p.add_argument("--sl", required=True, help="test structured-light image (.exr)")
+    p.add_argument("--sl", default=None, help="test structured-light image (.exr); default: gray values of the PCD")
     p.add_argument("--tof", required=True, help="test ToF point cloud (.pcd)")
     p.add_argument("--save", action="store_true", help="save plots to Results/<name>/")
     p.add_argument("--name", default=None, help="results folder name (required with --save)")
@@ -952,9 +961,9 @@ def main():
     if args.save and not args.name:
         sys.exit("Error: --name is required when --save is set.")
 
-    GT_DISTANCE = DotCalibration.parse_distance_from_name(args.sl)
+    GT_DISTANCE = DotCalibration.parse_distance_from_name(args.sl or args.tof)
     if GT_DISTANCE is None:
-        print("Warning: no ground-truth distance in the SL file name.", file=sys.stderr)
+        print("Warning: no ground-truth distance in the file name.", file=sys.stderr)
     else:
         print(f"Ground-truth distance from filename: {GT_DISTANCE} m")
     if args.save:

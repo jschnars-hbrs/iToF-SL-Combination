@@ -59,6 +59,15 @@ The steps are as follows:
 4. Find subsample location using a 1D quadratic fit
 5. Triangulate with found location and return the triangulated depth
 
+<h2>GUI</h2>
+
+`cd codePaperlike && python -m gui` starts a desktop GUI (PySide6 + PyVista) for everything the notebook does:
+computing or choosing a calibration, test runs on one or many scenes (PCD or RAW `.npy`; without an EXR the
+SL image is taken from the PCD's gray values), result tables and interactive plots, PCD export and a 3-D viewer
+(z filter, SOR, mesh, distance measurement, CloudCompare hand-off). All parameters are read from the code, so new
+constants and keyword arguments appear automatically; each run is stored in `Results/gui/<date>_<name>/`.
+RAW files need the `itofcameracalibration` project (path, Python and HDF5 calibration under *Einstellungen*).
+
 <h2>Code Structure and Usage</h2>
 
 The code is divided into two files.
