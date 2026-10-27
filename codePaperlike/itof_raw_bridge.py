@@ -36,13 +36,19 @@ def raw_frames(raw, frames=None):
     return files[:frames] if frames else files
 
 
-def find_camera_config(raw):
-    """.hydra/config.yaml of the measurement project above a RAW folder/frame."""
+def camera_frequencies(raw, OmegaConf):
+    """Modulation frequencies [MHz] from the camera config above a RAW folder/frame: the measurement project's
+    .hydra/config.yaml (camera.settings.Frequency) or, for single recordings, the camera YAML saved next to
+    them (e.g. Schmersal_AM-T100_RAOI.yaml, settings.Frequency at top level)."""
     for parent in Path(raw).resolve().parents:
-        cfg = parent / ".hydra" / "config.yaml"
-        if cfg.is_file():
-            return cfg
-    raise FileNotFoundError(f"No .hydra/config.yaml above {raw} (needed for the modulation frequency)")
+        hydra = parent / ".hydra" / "config.yaml"
+        candidates = [(hydra, "camera.settings.Frequency")] if hydra.is_file() else []
+        candidates += [(cfg, "settings.Frequency") for cfg in sorted(parent.glob("*.yaml"))]
+        for cfg, key in candidates:
+            f = OmegaConf.select(OmegaConf.load(cfg), key)
+            if f is not None:
+                return list(f) if OmegaConf.is_list(f) else [f]
+    raise FileNotFoundError(f"No camera config (.hydra/config.yaml or *.yaml with settings.Frequency) above {raw}")
 
 
 def set_index(raw):
@@ -94,7 +100,7 @@ def main():
     files = raw_frames(args.raw, args.frames)
     if not files:
         sys.exit(f"No RAW frames (≥ 4 MB .npy) in {args.raw}")
-    freqs = list(OmegaConf.load(find_camera_config(args.raw)).camera.settings.Frequency)
+    freqs = camera_frequencies(args.raw, OmegaConf)
     mode = args.mode
     if mode == "auto":
         mode = "2F" if second_set(args.raw) is not None and len(freqs) > 1 else "dots"

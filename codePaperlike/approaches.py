@@ -32,25 +32,27 @@ A1_AB_PEAK_WIN = 4              # samples: Approach 1 searches min ε only this 
 A1_PEAK_MIN_FRAC = 0.2          # … and only near peaks with at least this fraction of the trail's strongest prominence
 
 PEAK_MIN_DISTANCE = 3           # samples between AB peaks along a trail
-PEAK_PROMINENCE_FRAC = 0.05     # "strong" peak: prominence relative to the trail maximum
-WEAK_PEAK_MAX_SIGMA = 3.0       # weak peaks must agree with iToF within this many σ_ToF
 AB_SMOOTH_SIGMA = 2.0           # samples, speckle smoothing before peak finding
 AB_BG_WIN = 21                  # samples, local baseline window
 AB_MIN_CONTRAST = 0.01          # min peak prominence relative to the local baseline
 AB_NOISE_K = 3.0                # min peak prominence in σ of the smoothed noise
-AB_AMBIGUITY_RATIO = 0.5        # weak peak invalid unless ε_best ≤ ratio · ε_runner-up
 AB_CROSS_HALF = 1               # ±px perpendicular averaging along the trail
 
-AB_SELECT_MODE = "mpi"          # "mpi" (one-sided, MPI-aware) | "min_eps"
-MPI_MAX_W = 1.2                 # [1/m] max iToF excess in 1/z
-MPI_TOL_W = 0.05                # [1/m] tolerance behind the iToF
+# Peak selection (Approaches 2/3): per trail the AB peak whose residual r = 1/z_ToF − 1/z_SL is closest to
+# the local iToF bias b. b is voted by the neighbouring trails, so a scene-wide multipath / skin bias is
+# followed, and on a flat wall (b ≈ 0) this is the min-ε peak.
+MPI_MAX_REL = 0.6               # iToF may read at most this fraction longer than SL (z_ToF ≤ (1 + x)·z_SL)
+MPI_TOL_W = 0.1                 # [1/m] max residual r the other way (iToF shorter than SL: noise)
+BIAS_NEIGHBOURS = 16            # nearest trails that vote for the local bias
+BIAS_KERNEL_W = 0.05            # [1/m] width of one vote
+BIAS_PRIOR = 0.5                # [m] votes weighted by exp(−x·|b|): with equal support the smaller bias wins
+BIAS_GATE_W = 0.2               # [1/m] the selected peak may lie this far beyond the local bias (iToF longer: MPI)
+BIAS_GATE_SHORT_W = 0.1         # [1/m] … and this far the other way (iToF shorter: only noise or a wrong SL peak)
 BLOB_NOISE_K = 2.0              # DoG blob must exceed this many σ of the DoG noise
-BLOB_RADIUS = 2.5               # px, trail peak ↔ blob distance
+BLOB_RADIUS = 2.5               # px, trail peak ↔ blob distance (only peaks with a blob vote)
 TOF_MAD_WIN = 5                 # px, window of the robust iToF spread
-TOF_MAD_MAX = 0.05              # m, above: iToF unusable at that peak
-MPI_LOCAL_RADIUS = 40           # px, neighbourhood of the local consistency check
-MPI_LOCAL_MIN = 3               # neighbours needed for the check
-MPI_LOCAL_TOL = 0.3             # [1/m] allowed deviation from the neighbours' residual
+TOF_MAD_MAX = 0.05              # m, iToF spread up to which a peak may vote
+TOF_MAD_SELECT = 0.1            # m, iToF spread up to which a peak may be selected
 
 SATURATION_LEVEL = None         # None: dtype max for integer images, no correction for float
 QUAD_HALF_WIN_MIN = 2           # samples, min half window of the 1-D quadratic
@@ -505,31 +507,25 @@ def sl_tof_conflict(z_sl, z_tof, gain, sigma_sl_fn, sigma_tof_fn):
     return abs(z_sl - z_tof) > FUSION_MAX_SIGMA * np.hypot(sigma_sl_fn(z_sl, gain), sigma_tof_fn(z_tof))
 
 
-def weak_peak_rejected(r, sigma_tof_fn, max_sigma=None):
-    """True for a weak AB peak that does not agree with iToF within max_sigma · σ_ToF."""
-    if not r["weak_peak"]:
-        return False
-    max_sigma = WEAK_PEAK_MAX_SIGMA if max_sigma is None else max_sigma
-    zt = r["z_tof"]
-    return not (np.isfinite(zt) and abs(r["z_sl"] - zt) <= max_sigma * sigma_tof_fn(zt))
+def ab_gated(r):
+    """True if a front-end candidate is not used."""
+    return not r["valid"]
 
 
-def ab_gated(r, sigma_tof_fn, weak_max_sigma=None):
-    """True if a front-end candidate is not used (in 'min_eps' mode: ε gate + weak-peak check)."""
-    if not r["valid"]:
-        return True
-    if AB_SELECT_MODE == "mpi":
-        return False
-    return ((EPS_THRESHOLD is not None and r["eps_best"] > EPS_THRESHOLD)
-            or weak_peak_rejected(r, sigma_tof_fn, weak_max_sigma))
+def local_bias(uv, votes, grid):
+    """Local iToF bias per trail: argmax over grid of the votes of its BIAS_NEIGHBOURS nearest trails (0 without votes)."""
+    _, nb = cKDTree(uv).query(uv, k=min(BIAS_NEIGHBOURS + 1, len(uv)))
+    support = votes[np.atleast_2d(nb.T).T].sum(axis=1) * np.exp(-BIAS_PRIOR * np.abs(grid))[None, :]
+    b = grid[np.argmax(support, axis=1)]
+    return np.where(support.max(axis=1) >= 1.0, b, 0.0)
 
 
 def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
     """Shared front-end of Approaches 2/3: AB peaks per trail → peak selection → 2-D refinement → depth (cached per setup)."""
     cache_key = (AB_SUBPIXEL_MODE, AB_PATCH_RADIUS, keep_curves, AB_SMOOTH_SIGMA, AB_CROSS_HALF,
-                 PEAK_MIN_DISTANCE, AB_BG_WIN, AB_MIN_CONTRAST, AB_NOISE_K, AB_AMBIGUITY_RATIO,
-                 AB_MAX_SHIFT, AB_SELECT_MODE, MPI_MAX_W, MPI_TOL_W, BLOB_RADIUS, TOF_MAD_WIN,
-                 TOF_MAD_MAX, MPI_LOCAL_RADIUS, MPI_LOCAL_MIN, MPI_LOCAL_TOL)
+                 PEAK_MIN_DISTANCE, AB_BG_WIN, AB_MIN_CONTRAST, AB_NOISE_K, AB_MAX_SHIFT, MPI_MAX_REL, MPI_TOL_W,
+                 BIAS_NEIGHBOURS, BIAS_KERNEL_W, BIAS_PRIOR, BIAS_GATE_W, BIAS_GATE_SHORT_W, BLOB_RADIUS, TOF_MAD_WIN, TOF_MAD_MAX,
+                 TOF_MAD_SELECT)
     cached = setup.get("_ab_cache", {}).get(cache_key)
     if cached is not None:
         return [dict(r) for r in cached]
@@ -555,14 +551,17 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
                  u_sub=u_sub, v_sub=v_sub, z_sl=z_sl, z_tof=z_tof, d_perp=d_perp)
 
     results = []
-    mpi_cands = {}
+    cands = []          # per result: (r of the selectable peaks, their trail indices, trail, sig_s, base) or None
+    votes = []          # per result: r of the peaks that vote for the local bias
     for i, trail in enumerate(setup["trails"]):
         if trail is None:
             continue
         r = dict(i=i, valid=False, eps_best=np.inf, k_best=-1, k_sub=np.nan, u_sub=np.nan, v_sub=np.nan,
-                 z_sl=np.nan, z_tof=np.nan, n_peaks=0, gain=trail_gain(trail), d_perp=np.nan, ambiguous=False,
-                 weak_peak=False, eps_signed=np.nan, reject=None)
+                 z_sl=np.nan, z_tof=np.nan, n_peaks=0, gain=trail_gain(trail), d_perp=np.nan,
+                 eps_signed=np.nan, bias=np.nan, reject=None)
         results.append(r)
+        cands.append(None)
+        votes.append(np.zeros(0))
 
         ab = saturation_correct(sample_trail_brightness(sl_gray, trail), setup["sat_level"])
         finite = np.isfinite(ab)
@@ -586,61 +585,46 @@ def ab_trail_candidates(dotCal, cal, setup, keep_curves=False):
         if keep_curves:
             r["eps_peaks"] = eps_pk
 
-        if AB_SELECT_MODE == "mpi":
-            r_pk = w_tof_pk - trail["w"][peaks]
-            blob = np.zeros(len(peaks), bool)
-            if setup.get("blob_tree") is not None:
-                blob = setup["blob_tree"].query(np.c_[trail["u"][peaks], trail["v"][peaks]])[0] <= BLOB_RADIUS
-            tof_ok = tof_mad_at(setup["tof_z"], trail["u"][peaks], trail["v"][peaks]) < TOF_MAD_MAX
-            in_win = np.isfinite(r_pk) & (r_pk >= -MPI_MAX_W) & (r_pk <= MPI_TOL_W)
-            ok = blob & tof_ok & in_win
-            if not blob.any():
-                r["reject"] = "no_blob"
-            elif not (blob & tof_ok).any():
-                r["reject"] = "tof"
-            elif not ok.any():
-                r["reject"] = "mpi_window"
-            if not ok.any():
-                continue
-            p_best = int(np.flatnonzero(ok)[np.argmax(r_pk[ok])])
-            k0 = int(peaks[p_best])
-            weak_peak = ambiguous = False
-            r["r_sel"] = float(r_pk[p_best])
-            mpi_cands[len(results) - 1] = (r_pk[ok], peaks[ok], trail, sig_s, base)
-        else:
-            order = np.argsort(eps_pk)
-            p_best = int(order[0])
-            if not np.isfinite(eps_pk[p_best]):
-                continue
-            k0 = int(peaks[p_best])
-            strong_pk, _ = scipy.signal.find_peaks(sig_s, prominence=PEAK_PROMINENCE_FRAC * float(sig_s.max()),
-                                                   distance=PEAK_MIN_DISTANCE)
-            weak_peak = not np.any(np.abs(strong_pk - k0) <= AB_MAX_SHIFT)
-            rivals = [p for p in order[1:] if abs(int(peaks[p]) - k0) > 2 * AB_MAX_SHIFT]
-            ambiguous = weak_peak and bool(rivals) and eps_pk[p_best] > AB_AMBIGUITY_RATIO * eps_pk[rivals[0]]
+        # admissible: iToF at most MPI_MAX_REL longer than SL, at most MPI_TOL_W (in 1/z) shorter
+        w_pk = trail["w"][peaks]
+        r_pk = w_tof_pk - w_pk
+        adm = np.isfinite(r_pk) & (r_pk >= -w_pk * MPI_MAX_REL / (1.0 + MPI_MAX_REL)) & (r_pk <= MPI_TOL_W)
+        mad = tof_mad_at(setup["tof_z"], trail["u"][peaks], trail["v"][peaks])
+        sel = adm & (mad < TOF_MAD_SELECT)
+        if not sel.any():
+            r["reject"] = "tof"
+            continue
+        cands[-1] = (r_pk[sel], peaks[sel], trail, sig_s, base)
+        blob = np.zeros(len(peaks), bool)
+        if setup.get("blob_tree") is not None:
+            blob = setup["blob_tree"].query(np.c_[trail["u"][peaks], trail["v"][peaks]])[0] <= BLOB_RADIUS
+        votes[-1] = r_pk[adm & blob & (mad < TOF_MAD_MAX)]
 
-        r.update(valid=not ambiguous, ambiguous=bool(ambiguous), weak_peak=bool(weak_peak))
-        refine(r, trail, sig_s, base, k0)
-
-    if mpi_cands:
-        idx = np.array(sorted(mpi_cands))
-        uv = np.array([(results[k]["u_sub"], results[k]["v_sub"]) for k in idx])
-        r_sel = np.array([results[k]["r_sel"] for k in idx])
-        tree = cKDTree(uv)
-        for n, k in enumerate(idx):
-            nb = [m for m in tree.query_ball_point(uv[n], MPI_LOCAL_RADIUS) if m != n]
-            if len(nb) < MPI_LOCAL_MIN:
+    if results:
+        lo = min([float(v.min()) for v in votes if len(v)], default=0.0)
+        grid = np.arange(np.floor(lo / 0.01) * 0.01 - 3 * BIAS_KERNEL_W, MPI_TOL_W + 1e-9, 0.01)
+        V = np.zeros((len(results), len(grid)))
+        for n, v in enumerate(votes):
+            if len(v):  # one vote per trail and bias value
+                V[n] = np.exp(-0.5 * ((grid[None, :] - v[:, None]) / BIAS_KERNEL_W) ** 2).max(axis=0)
+        uv = np.array([(np.mean(t["u"]), np.mean(t["v"])) for t in setup["trails"] if t is not None])
+        bias = local_bias(uv, V, grid)
+        for r, c, b in zip(results, cands, bias):
+            r["bias"] = float(b)
+            if c is None:
                 continue
-            b = float(np.median(r_sel[nb]))
-            if abs(r_sel[n] - b) <= MPI_LOCAL_TOL:
-                continue
-            r_ok, pk_ok, trail, sig_s, base = mpi_cands[k]
+            r_ok, pk_ok, trail, sig_s, base = c
             m = int(np.argmin(np.abs(r_ok - b)))
-            if abs(r_ok[m] - b) > MPI_LOCAL_TOL:
-                results[k].update(valid=False, reject="local")
+            if not -BIAS_GATE_W <= r_ok[m] - b <= BIAS_GATE_SHORT_W:
+                r["reject"] = "bias"
                 continue
-            results[k]["r_sel"] = float(r_ok[m])
-            refine(results[k], trail, sig_s, base, int(pk_ok[m]))
+            refine(r, trail, sig_s, base, int(pk_ok[m]))
+            # the refinement moves the peak: the gates must still hold at the refined position
+            rs = r["eps_signed"]
+            r["valid"] = bool(np.isfinite(rs) and -BIAS_GATE_W <= rs - b <= BIAS_GATE_SHORT_W and rs <= MPI_TOL_W
+                              and rs >= -MPI_MAX_REL / (1.0 + MPI_MAX_REL) / r["z_sl"])
+            if not r["valid"]:
+                r["reject"] = "bias"
 
     setup.setdefault("_ab_cache", {})[cache_key] = results
     return [dict(r) for r in results]
@@ -834,7 +818,7 @@ def run_approach_2(dotCal, cal, setup, make_plots=False, limit=None):
 
     for r in cands:
         r.update(z_fus=np.nan, sigma_sl=np.nan, sigma_tof=np.nan, sigma_fus=np.nan, conflict=False)
-        if ab_gated(r, sigma_tof_fn, FUSION_MAX_SIGMA):
+        if ab_gated(r):
             continue
         zs = r["z_sl"] if np.isfinite(r["z_sl"]) and r["z_sl"] > 1e-6 else np.nan
         zt = r["z_tof"] if np.isfinite(r["z_tof"]) and r["z_tof"] > 1e-6 else np.nan
@@ -859,7 +843,7 @@ def run_approach_2(dotCal, cal, setup, make_plots=False, limit=None):
         elif np.isfinite(zt):
             r["z_fus"], r["sigma_fus"] = zt, r["sigma_tof"]
 
-    gated = [ab_gated(r, sigma_tof_fn, FUSION_MAX_SIGMA) for r in cands]
+    gated = [ab_gated(r) for r in cands]
     z_sl = np.array([np.nan if g else r["z_sl"] for r, g in zip(cands, gated)])
     z_tof = np.array([np.nan if g else r["z_tof"] for r, g in zip(cands, gated)])
     z_fus = np.array([r["z_fus"] for r in cands])
@@ -925,24 +909,21 @@ def _ab_trail_fig(ex, trail, label):
 
 def run_approach_3(dotCal, cal, setup, make_plots=False, limit=None):
     """Approach 3: AB-peak front-end, returns the triangulated depth of the selected, refined peak (Godbaz §4.2)."""
-    _, _, sigma_tof_fn = sigma_models(cal)
     cands = ab_trail_candidates(dotCal, cal, setup, keep_curves=make_plots)
     for r in cands:
-        r["Z_out"] = np.nan if ab_gated(r, sigma_tof_fn) else r["z_sl"]
+        r["Z_out"] = np.nan if ab_gated(r) else r["z_sl"]
 
     z_out = np.array([r["Z_out"] for r in cands])
     eps_all = np.array([r["eps_best"] for r in cands], float)
     n_peakless = sum(r["n_peaks"] == 0 for r in cands)
     n_invalid = int(np.sum(~np.isfinite(z_out)))
-    if AB_SELECT_MODE == "mpi":
-        n_rej = Counter(r.get("reject") for r in cands if r["n_peaks"] > 0)
-        print(f"Approach 3: {len(cands)} trails ({n_peakless} without AB peaks, "
-              f"{n_rej['no_blob']} without a 2-D dot, {n_rej['tof']} without usable iToF, "
-              f"{n_rej['mpi_window']} outside the MPI window, "
-              f"{n_rej['local']} inconsistent with their neighbours; {n_invalid} invalid in total)")
-    else:
-        print(f"Approach 3: {len(cands)} trails ({n_peakless} without AB peaks, "
-              f"{sum(r['ambiguous'] for r in cands)} ambiguous, {n_invalid} invalid in total after ε-gate)")
+    n_rej = Counter(r.get("reject") for r in cands if r["n_peaks"] > 0)
+    bias = np.array([r["bias"] for r in cands if r["valid"]], float)
+    print(f"Approach 3: {len(cands)} trails ({n_peakless} without AB peaks, {n_rej['tof']} without usable iToF, "
+          f"{n_rej['bias']} too far from the local iToF bias; {n_invalid} invalid in total)")
+    if bias.size:
+        print(f"  local iToF bias 1/z_ToF − 1/z_SL: median {np.median(bias):+.3f} 1/m "
+              f"(5–95 %: {np.percentile(bias, 5):+.3f} … {np.percentile(bias, 95):+.3f})")
     print(f"  {_std_note(z_out, 'Z_out (triangulated)')}")
 
     figures = {}
@@ -962,7 +943,8 @@ def run_approach_3(dotCal, cal, setup, make_plots=False, limit=None):
             setup["sl_gray"], [r["u_sub"] for r in cands], [r["v_sub"] for r in cands], z_out, dot_idx,
             "Z_tri [m]", "Approach 3 – Active Brightness: depth overlay", std_note=_std_note(z_out))
         figures["approach3_eps_histogram"] = _eps_hist_fig(
-            eps_all, EPS_THRESHOLD, r"Approach 3 – Distribution of best $\varepsilon$ (AB peaks)")
+            [abs(r["eps_signed"] - r["bias"]) for r in cands if r["valid"]], BIAS_GATE_W,
+            r"Approach 3 – $|\varepsilon_{signed} - b_{local}|$ of the selected AB peaks")
 
     maybe_write_error_distribution(setup, z_out, 3)
     return {"results": cands, "figures": figures, "depths": z_out}
