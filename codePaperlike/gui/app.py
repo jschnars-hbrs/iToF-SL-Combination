@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
 
 from dot_calibration import DotCalibration, cache_tag  # noqa: E402
 from gui import params as P  # noqa: E402
-from gui.inputs import CODE_DIR, ROOT, Scene, collect, from_session_path, to_session_path  # noqa: E402
+from gui.inputs import CODE_DIR, ROOT, Scene, _key, collect, from_session_path, to_session_path  # noqa: E402
 from gui.viewer import Viewer  # noqa: E402
 
 CAL_ROOT = ROOT / "Calibrations"
@@ -543,7 +543,18 @@ class TestTab(QWidget):
 
     def add_paths(self, paths):
         scenes, unused = collect(paths, parse_gt=DotCalibration.parse_distance_from_name)
-        known = {(s.tof, s.raw) for s in self.table.scenes}
+        known = {(s.tof, s.raw): s for s in self.table.scenes}
+        for s in scenes:  # re-dropped scene: take over a newly paired SL image
+            old = known.get((s.tof, s.raw))
+            if old is not None and old.sl is None and s.sl is not None:
+                old.sl = s.sl
+        # images dropped on their own: pair with a listed scene of the same name that has no SL image yet
+        for img in list(unused):
+            hits = [s for s in self.table.scenes if s.sl is None and _key(s.tof or s.raw) == _key(img)]
+            same_dir = [s for s in hits if (s.tof or s.raw).parent == img.parent]
+            if same_dir or len(hits) == 1:
+                (same_dir or hits)[0].sl = img
+                unused.remove(img)
         self.table.set_scenes(self.table.scenes + [s for s in scenes if (s.tof, s.raw) not in known])
         if unused:
             QMessageBox.information(self, "Ohne ToF", "Diese Bilder haben keine passende PCD/RAW und wurden "

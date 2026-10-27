@@ -27,6 +27,9 @@ ERROR_DISTRIBUTION_CSV = False  # write an error histogram CSV per approach (nee
 GT_DISTANCE = None              # [m] ground truth of the test scene
 
 EPS_THRESHOLD = 0.1             # [1/m] consistency-error gate |1/Z_ToF − 1/Z_tri|
+A1_AB_PEAK_WIN = 4              # samples: Approach 1 searches min ε only this close to AB peaks of the trail
+                                # (None: whole trail; trails without AB peaks are then searched whole)
+A1_PEAK_MIN_FRAC = 0.2          # … and only near peaks with at least this fraction of the trail's strongest prominence
 
 PEAK_MIN_DISTANCE = 3           # samples between AB peaks along a trail
 PEAK_PROMINENCE_FRAC = 0.05     # "strong" peak: prominence relative to the trail maximum
@@ -59,7 +62,9 @@ AB_PATCH_RADIUS = 6             # px half-size of the 2-D refinement patch
 SIGMA_U_FALLBACK = 0.1                            # px, if the calibration has no σ_u
 SIGMA_TOF_FALLBACK = lambda z: 0.005 + 0.002 * z  # m, if the calibration has no σ_ToF table
 SIGMA_FLOOR = 1e-4                                # m, avoids zero variances
-SIGMA_U_FLOOR = 0.2                               # px, lower bound on the runtime σ_u
+SIGMA_U_FLOOR = 0.1                               # px, lower bound on the runtime σ_u (0.2: σ_SL ~2× too pessimistic on real data)
+SIGMA_TOF_SCALE = 4.0                             # σ_ToF table × this: the table holds the temporal spread, the
+                                                  # real per-pixel ToF error on a flat wall is ~3–5× larger
 FUSION_MAX_SIGMA = 20.0         # SL and iToF further apart than this many σ are not fused
 FUSION_MPI_SIGMA = True         # inflate σ_ToF by how far the iToF lies behind the SL depth
 FUSION_MPI_NSIGMA = 3.0         # … only beyond this many combined σ
@@ -135,7 +140,7 @@ def sigma_models(cal):
     if table is not None and len(table) > 0:
         def sigma_tof(z):
             """σ_ToF interpolated from the calibration noise table."""
-            return max(float(np.interp(z, table[:, 0], table[:, 1])), SIGMA_FLOOR)
+            return max(SIGMA_TOF_SCALE * float(np.interp(z, table[:, 0], table[:, 1])), SIGMA_FLOOR)
     else:
         print("  (calibration has no sigma_tof_table — using fallback model)")
 
@@ -479,6 +484,20 @@ def trail_peaks(sig):
     return sig_s, base, peaks
 
 
+def ab_peaks_on_trail(setup, trail, min_frac=0.0):
+    """Indices of the active-brightness peaks along a trail (where the SL image shows a dot) whose prominence
+    is at least min_frac of the strongest one."""
+    ab = saturation_correct(sample_trail_brightness(setup["sl_gray"], trail), setup["sat_level"])
+    finite = np.isfinite(ab)
+    if not np.any(finite):
+        return np.array([], int)
+    sig_s, base, peaks = trail_peaks(np.where(finite, ab, 0.0))
+    if len(peaks) and min_frac > 0:
+        prom = scipy.signal.peak_prominences(sig_s - base, peaks)[0]
+        peaks = peaks[prom >= min_frac * prom.max()]
+    return peaks
+
+
 def sl_tof_conflict(z_sl, z_tof, gain, sigma_sl_fn, sigma_tof_fn):
     """True if SL and iToF disagree by more than FUSION_MAX_SIGMA combined σ."""
     if not (np.isfinite(z_sl) and z_sl > 1e-6 and np.isfinite(z_tof) and z_tof > 1e-6):
@@ -734,6 +753,11 @@ def run_approach_1(dotCal, cal, setup, make_plots=False, limit=None, dot_sample=
         if trail is None:
             continue
         Z_tof, eps = scan_trail(trail, setup["tof_sampler"])
+        if A1_AB_PEAK_WIN is not None:
+            peaks = ab_peaks_on_trail(setup, trail, A1_PEAK_MIN_FRAC)
+            if len(peaks):
+                near = np.abs(np.arange(len(eps))[:, None] - peaks[None, :]).min(axis=1) <= A1_AB_PEAK_WIN
+                eps = np.where(near, eps, np.inf)
         k_best = int(np.argmin(eps))
         eps_best = float(eps[k_best])
         valid = np.isfinite(eps_best) and (EPS_THRESHOLD is None or eps_best <= EPS_THRESHOLD)

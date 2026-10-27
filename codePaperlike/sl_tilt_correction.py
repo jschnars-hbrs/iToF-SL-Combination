@@ -61,9 +61,38 @@ def apply_tilt(cal, tilt_mrad, source="manual"):
     return new
 
 
-def correct_cal(cal, offset_mm=None, z_ref=None, tilt_mrad=None):
-    """Calibration with tilt correction from a direct tilt or an observed offset; unchanged if neither is given."""
+def apply_z_shift(cal, z_shift_mm):
+    """Copy of a calibration dict whose trail depth labels are z − z_shift_mm (calibration distances measured too far)."""
+    dz = z_shift_mm * 1e-3
+    trails = []
+    for t in cal["trails"]:
+        if t is None:
+            trails.append(None)
+            continue
+        z = np.asarray(t["z"], float) - dz
+        keep = z > 1e-6
+        if keep.sum() < 2:
+            trails.append(None)
+            continue
+        trails.append({"u": np.asarray(t["u"], float)[keep], "v": np.asarray(t["v"], float)[keep],
+                       "w": 1.0 / z[keep], "z": z[keep]})
+    new = copy.copy(cal)
+    new["trails"] = trails
+    new["metadata"] = dict(cal.get("metadata", {}), sl_z_shift_mm=float(z_shift_mm))
+    return new
+
+
+def correct_cal(cal, offset_mm=None, z_ref=None, tilt_mrad=None, z_shift_mm=None):
+    """Calibration with tilt correction from a direct tilt or an observed offset, and/or a constant z shift of
+    the trail labels (z_shift_mm > 0: the SL reads that much too far at every distance); unchanged if none is given."""
+    if z_shift_mm:
+        print(f"SL z shift: trail depth labels − {z_shift_mm:.1f} mm")
+        cal = apply_z_shift(cal, z_shift_mm)
+    if tilt_mrad is not None and offset_mm is not None:
+        raise ValueError("give either offset_mm + z_ref or tilt_mrad, not both (set the other to None)")
     if tilt_mrad is None and offset_mm is not None:
+        if z_ref is None:
+            raise ValueError("offset_mm needs z_ref: the distance [m] at which the SL reads offset_mm too far")
         tilt_mrad = tilt_from_offset(cal["trails"], cal["K"], cal_mode(cal), offset_mm, z_ref)["tilt_mrad"]
     if tilt_mrad is None:
         print("SL tilt correction off — trails as calibrated")
