@@ -71,6 +71,24 @@ CAMERAS = {
         pcd_glob="ToF_*m.pcd",
         dist_offset=0,
     ),
+    # 6.11: both exposure sets (SL_1 exp 100, SL_2 exp 1000), flat-wall positions held back in 06.11_*_flatwall,
+    # GT = LDS + dot-parallax offset (10x10 +107.3 mm, Coherent +100.3 mm), iToF CalibData_*_6.11.hdf5
+    "SchmersalReal_6.11": dict(
+        sl_cal=ROOT / "Pictures/Calibration/SchmersalReal/06.11_10x10/SL",
+        tof_cal=ROOT / "Pictures/Calibration/SchmersalReal/06.11_10x10/ToF",
+        K=K_SCHMERSAL_REAL,
+        cal_blob=dict(max_sigma=10, num_sigma=10, min_sigma=10, threshold=0.05),
+        pcd_glob="ToF_*m.pcd",
+        dist_offset=0,
+    ),
+    "SchmersalRealCoherent_6.11": dict(
+        sl_cal=ROOT / "Pictures/Calibration/SchmersalReal/06.11_Coherent/SL",
+        tof_cal=ROOT / "Pictures/Calibration/SchmersalReal/06.11_Coherent/ToF",
+        K=K_SCHMERSAL_REAL,
+        cal_blob=dict(max_sigma=5, num_sigma=10, min_sigma=3, threshold=0.03),
+        pcd_glob="ToF_*m.pcd",
+        dist_offset=0,
+    ),
 }
 
 
