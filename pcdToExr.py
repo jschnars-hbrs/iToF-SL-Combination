@@ -24,8 +24,8 @@ except ImportError:
 
 from removePCDoutliers import read_pcd
 
-DEFAULT_INPUT = Path("MPI_Test")
-DEFAULT_OUTPUT = Path("MPI_Test_EXR")
+DEFAULT_INPUT = Path("BELAGO_Test")
+DEFAULT_OUTPUT = Path("BELAGO_TEST_EXR")
 
 #DEFAULT_INPUT = Path("/home/julian/Documents/Github/iToF-SL-Combination/Pictures/Calibration/SchmersalReal/30.09/ToF")
 #DEFAULT_OUTPUT = Path("/home/julian/Documents/Github/iToF-SL-Combination/Pictures/Calibration/SchmersalReal/30.09/SL")
