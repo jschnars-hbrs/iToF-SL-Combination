@@ -816,9 +816,9 @@ class DotCalibration:
         if image_shape is not None:
             H, W = image_shape
             inside = (u >= -margin) & (u <= W - 1 + margin) & (v >= -margin) & (v <= H - 1 + margin)
-            if not np.any(inside):
-                return None
             idx = np.nonzero(inside)[0]
+            if idx.size < 2:                  # outside or only grazing the image: no usable trail
+                return None
             sl = slice(idx[0], idx[-1] + 1)
             u, v, w = u[sl], v[sl], w[sl]
         with np.errstate(divide="ignore"):

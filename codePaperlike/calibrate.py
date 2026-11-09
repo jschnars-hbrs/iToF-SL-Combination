@@ -89,6 +89,17 @@ CAMERAS = {
         pcd_glob="ToF_*m.pcd",
         dist_offset=0,
     ),
+    # 6.11 Coherent, v2: + the 1.551 m flat-wall frame (SL_2 Pos0). Without it the dots move ≈ 10 px between
+    # 1.045 and 2.007 m, more than the NN tracking accepts (½ pitch ≈ 7.5 px), and neighbouring dots get linked.
+    # Calibrate with track_tx_space=True. (SL_1 Pos10, 1.371 m, shows no dots and is not usable.)
+    "SchmersalRealCoherent_6.11_v2": dict(
+        sl_cal=ROOT / "Pictures/Calibration/SchmersalReal/06.11_Coherent_v2/SL",
+        tof_cal=ROOT / "Pictures/Calibration/SchmersalReal/06.11_Coherent_v2/ToF",
+        K=K_SCHMERSAL_REAL,
+        cal_blob=dict(max_sigma=5, num_sigma=10, min_sigma=3, threshold=0.03),
+        pcd_glob="ToF_*m.pcd",
+        dist_offset=0,
+    ),
 }
 
 
