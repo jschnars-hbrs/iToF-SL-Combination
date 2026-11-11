@@ -1,0 +1,476 @@
+(override approaches.EPS_THRESHOLD = 0.75)
+Calibration loaded: /home/julian/Documents/Github/iToF-SL-Combination/Calibrations/SchmersalRealCoherent_6.11_v2_paperlike_sor6-0.40_06.11/calibration.json
+  created 2026-11-09T15:34:13.715395   mode y   B = [-22.55  41.97  11.92] mm
+  trails: 1169 / 1318 dots   σ_u = 0.053221612578194265   σ_u_ab = 0.054454445259439085
+  light origin (LPC): off
+  WARNING: SOR {'enabled': True, 'k': 6, 'nsigma': 0.4} ≠ current None
+SL tilt correction off — trails as calibrated
+GUI_EVENT|{"type": "scene_start", "scene": "flat_500mm_SL1_Pos2", "i": 0, "n": 6}
+
+######################################################################
+  [1/6] flat_500mm_SL1_Pos2
+######################################################################
+
+RAW → PCD: /home/julian/Documents/Calibrations/6.11/Coherent_SL_1/ToF_RAW/Pos2_set0
+  RAW: 10 frame(s) from /home/julian/Documents/Calibrations/6.11/Coherent_SL_1/ToF_RAW/Pos2_set0   frequencies [100] MHz   mode dots
+  New min phase for unambiguity range 0.0
+  Reading h5py calib file
+  fMod = 100 MHz, unambiguity range R = 1.4990 m, k = 0..3
+  Dots: 1064/1169 valid, k = [0], 0 ambiguous, 0 corrected
+  Mean of 10 frame(s) → ../Results/flatwall_6.11_v2/Coherent/flat_500mm_SL1_Pos2/tof/flat_500mm_SL1_Pos2.pcd
+GUI_EVENT|{"type": "pcd", "scene": "flat_500mm_SL1_Pos2", "path": "../Results/flatwall_6.11_v2/Coherent/flat_500mm_SL1_Pos2/tof/flat_500mm_SL1_Pos2.pcd", "label": "flat_500mm_SL1_Pos2 \u00b7 ToF"}
+SL image: gray values of the ToF cloud (no EXR given)
+Trails: 1169 / 1318 dots calibrated (mode: y)
+
+============================================================
+  flat_500mm_SL1_Pos2 · Approach 1
+============================================================
+
+Approach 1: scanned 1169 trails (68 invalidated by ε-threshold 0.75)
+  ε range: 3.040e-05 – 2.272e+00
+  Z_out (ToF @ min-ε): n=1101/1169  mean=0.5411 m  σ=9.26 mm
+
+  ** Approach 1 — Average Error **
+     GT distance:  0.5473 m
+     Valid dots:   1101 / 1169
+     Mean error:   -0.0062 m
+     Mean |error|: 0.0087 m
+     Std error:    0.0093 m
+     Min error:    -0.0289 m
+     Max error:    +0.0256 m
+AVG_ERR|1|0.5473|1101|1169|-0.006185|0.008731|0.009256|-0.028927|0.025595
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_500mm_SL1_Pos2", "approach": 1, "n_valid": 1101, "n_total": 1169, "mean_z_m": 0.5411145368107485, "std_z_m": 0.009256409176662407, "gt_m": 0.5473, "mean_m": -0.006185, "abs_mean_m": 0.008731, "std_m": 0.009256, "min_m": -0.028927, "max_m": 0.025595}}
+
+============================================================
+  flat_500mm_SL1_Pos2 · Approach 2
+============================================================
+
+Approach 2: 1169 trails, 1058 fused depths (0 SL/iToF conflicts > 20σ not fused)
+  SL (triangulated): n=1058/1169  mean=0.5434 m  σ=9.55 mm
+  iToF: n=1058/1169  mean=0.5408 m  σ=9.34 mm
+  Joint likelihood: n=1058/1169  mean=0.5434 m  σ=9.55 mm
+  mean predicted σ_SL: 1.23 mm
+  mean predicted σ_ToF: 34.78 mm
+  mean predicted σ_joint: 1.23 mm
+
+  ** Approach 2 — Average Error **
+     GT distance:  0.5473 m
+     Valid dots:   1058 / 1169
+     Mean error:   -0.0039 m
+     Mean |error|: 0.0074 m
+     Std error:    0.0095 m
+     Min error:    -0.0520 m
+     Max error:    +0.0234 m
+AVG_ERR|2|0.5473|1058|1169|-0.003920|0.007371|0.009547|-0.052000|0.023369
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_500mm_SL1_Pos2", "approach": 2, "n_valid": 1058, "n_total": 1169, "mean_z_m": 0.543379903083062, "std_z_m": 0.009546818722308956, "gt_m": 0.5473, "mean_m": -0.00392, "abs_mean_m": 0.007371, "std_m": 0.009547, "min_m": -0.052, "max_m": 0.023369}}
+
+============================================================
+  flat_500mm_SL1_Pos2 · Approach 3
+============================================================
+
+Approach 3: 1169 trails (6 without AB peaks, 65 without usable iToF, 40 too far from the local iToF bias; 111 invalid in total)
+  local iToF bias 1/z_ToF − 1/z_SL: median +0.010 1/m (5–95 %: -0.010 … +0.020)
+  Z_out (triangulated): n=1058/1169  mean=0.5434 m  σ=9.55 mm
+
+  ** Approach 3 — Average Error **
+     GT distance:  0.5473 m
+     Valid dots:   1058 / 1169
+     Mean error:   -0.0039 m
+     Mean |error|: 0.0074 m
+     Std error:    0.0095 m
+     Min error:    -0.0520 m
+     Max error:    +0.0234 m
+AVG_ERR|3|0.5473|1058|1169|-0.003917|0.007371|0.009549|-0.052038|0.023368
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_500mm_SL1_Pos2", "approach": 3, "n_valid": 1058, "n_total": 1169, "mean_z_m": 0.5433831305888748, "std_z_m": 0.009548500646981777, "gt_m": 0.5473, "mean_m": -0.003917, "abs_mean_m": 0.007371, "std_m": 0.009549, "min_m": -0.052038, "max_m": 0.023368}}
+GUI_EVENT|{"type": "figures", "scene": "flat_500mm_SL1_Pos2", "dir": "../Results/flatwall_6.11_v2/Coherent/flat_500mm_SL1_Pos2/figures"}
+GUI_EVENT|{"type": "scene_start", "scene": "flat_750mm_SL1_Pos6", "i": 1, "n": 6}
+
+######################################################################
+  [2/6] flat_750mm_SL1_Pos6
+######################################################################
+
+RAW → PCD: /home/julian/Documents/Calibrations/6.11/Coherent_SL_1/ToF_RAW/Pos6_set0
+  RAW: 10 frame(s) from /home/julian/Documents/Calibrations/6.11/Coherent_SL_1/ToF_RAW/Pos6_set0   frequencies [100] MHz   mode dots
+  New min phase for unambiguity range 0.0
+  Reading h5py calib file
+  fMod = 100 MHz, unambiguity range R = 1.4990 m, k = 0..3
+  Dots: 1081/1169 valid, k = [0], 0 ambiguous, 0 corrected
+  Mean of 10 frame(s) → ../Results/flatwall_6.11_v2/Coherent/flat_750mm_SL1_Pos6/tof/flat_750mm_SL1_Pos6.pcd
+GUI_EVENT|{"type": "pcd", "scene": "flat_750mm_SL1_Pos6", "path": "../Results/flatwall_6.11_v2/Coherent/flat_750mm_SL1_Pos6/tof/flat_750mm_SL1_Pos6.pcd", "label": "flat_750mm_SL1_Pos6 \u00b7 ToF"}
+SL image: gray values of the ToF cloud (no EXR given)
+Trails: 1169 / 1318 dots calibrated (mode: y)
+
+============================================================
+  flat_750mm_SL1_Pos6 · Approach 1
+============================================================
+
+Approach 1: scanned 1169 trails (76 invalidated by ε-threshold 0.75)
+  ε range: 7.626e-06 – 3.581e+00
+  Z_out (ToF @ min-ε): n=1093/1169  mean=0.7870 m  σ=10.25 mm
+
+  ** Approach 1 — Average Error **
+     GT distance:  0.7982 m
+     Valid dots:   1093 / 1169
+     Mean error:   -0.0112 m
+     Mean |error|: 0.0123 m
+     Std error:    0.0102 m
+     Min error:    -0.0397 m
+     Max error:    +0.0141 m
+AVG_ERR|1|0.7982|1093|1169|-0.011161|0.012336|0.010245|-0.039733|0.014098
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_750mm_SL1_Pos6", "approach": 1, "n_valid": 1093, "n_total": 1169, "mean_z_m": 0.7870385906455692, "std_z_m": 0.010245214304707935, "gt_m": 0.7982, "mean_m": -0.011161, "abs_mean_m": 0.012336, "std_m": 0.010245, "min_m": -0.039733, "max_m": 0.014098}}
+
+============================================================
+  flat_750mm_SL1_Pos6 · Approach 2
+============================================================
+
+Approach 2: 1169 trails, 1082 fused depths (0 SL/iToF conflicts > 20σ not fused)
+  SL (triangulated): n=1082/1169  mean=0.7941 m  σ=12.76 mm
+  iToF: n=1082/1169  mean=0.7863 m  σ=10.36 mm
+  Joint likelihood: n=1082/1169  mean=0.7941 m  σ=12.74 mm
+  mean predicted σ_SL: 2.65 mm
+  mean predicted σ_ToF: 33.78 mm
+  mean predicted σ_joint: 2.64 mm
+
+  ** Approach 2 — Average Error **
+     GT distance:  0.7982 m
+     Valid dots:   1082 / 1169
+     Mean error:   -0.0041 m
+     Mean |error|: 0.0094 m
+     Std error:    0.0127 m
+     Min error:    -0.1035 m
+     Max error:    +0.0775 m
+AVG_ERR|2|0.7982|1082|1169|-0.004132|0.009366|0.012743|-0.103486|0.077541
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_750mm_SL1_Pos6", "approach": 2, "n_valid": 1082, "n_total": 1169, "mean_z_m": 0.7940676909662333, "std_z_m": 0.012742610627623153, "gt_m": 0.7982, "mean_m": -0.004132, "abs_mean_m": 0.009366, "std_m": 0.012743, "min_m": -0.103486, "max_m": 0.077541}}
+
+============================================================
+  flat_750mm_SL1_Pos6 · Approach 3
+============================================================
+
+Approach 3: 1169 trails (6 without AB peaks, 58 without usable iToF, 23 too far from the local iToF bias; 87 invalid in total)
+  local iToF bias 1/z_ToF − 1/z_SL: median +0.010 1/m (5–95 %: +0.000 … +0.020)
+  Z_out (triangulated): n=1082/1169  mean=0.7941 m  σ=12.76 mm
+
+  ** Approach 3 — Average Error **
+     GT distance:  0.7982 m
+     Valid dots:   1082 / 1169
+     Mean error:   -0.0041 m
+     Mean |error|: 0.0094 m
+     Std error:    0.0128 m
+     Min error:    -0.1038 m
+     Max error:    +0.0781 m
+AVG_ERR|3|0.7982|1082|1169|-0.004084|0.009363|0.012765|-0.103834|0.078107
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_750mm_SL1_Pos6", "approach": 3, "n_valid": 1082, "n_total": 1169, "mean_z_m": 0.7941164517577955, "std_z_m": 0.012764938122893478, "gt_m": 0.7982, "mean_m": -0.004084, "abs_mean_m": 0.009363, "std_m": 0.012765, "min_m": -0.103834, "max_m": 0.078107}}
+GUI_EVENT|{"type": "figures", "scene": "flat_750mm_SL1_Pos6", "dir": "../Results/flatwall_6.11_v2/Coherent/flat_750mm_SL1_Pos6/figures"}
+GUI_EVENT|{"type": "scene_start", "scene": "flat_1000mm_SL1_Pos9", "i": 2, "n": 6}
+
+######################################################################
+  [3/6] flat_1000mm_SL1_Pos9
+######################################################################
+
+RAW → PCD: /home/julian/Documents/Calibrations/6.11/Coherent_SL_1/ToF_RAW/Pos9_set0
+  RAW: 10 frame(s) from /home/julian/Documents/Calibrations/6.11/Coherent_SL_1/ToF_RAW/Pos9_set0   frequencies [100] MHz   mode dots
+  New min phase for unambiguity range 0.0
+  Reading h5py calib file
+  fMod = 100 MHz, unambiguity range R = 1.4990 m, k = 0..3
+  Dots: 1088/1169 valid, k = [0], 0 ambiguous, 0 corrected
+  Mean of 10 frame(s) → ../Results/flatwall_6.11_v2/Coherent/flat_1000mm_SL1_Pos9/tof/flat_1000mm_SL1_Pos9.pcd
+GUI_EVENT|{"type": "pcd", "scene": "flat_1000mm_SL1_Pos9", "path": "../Results/flatwall_6.11_v2/Coherent/flat_1000mm_SL1_Pos9/tof/flat_1000mm_SL1_Pos9.pcd", "label": "flat_1000mm_SL1_Pos9 \u00b7 ToF"}
+SL image: gray values of the ToF cloud (no EXR given)
+Trails: 1169 / 1318 dots calibrated (mode: y)
+
+============================================================
+  flat_1000mm_SL1_Pos9 · Approach 1
+============================================================
+
+Approach 1: scanned 1169 trails (111 invalidated by ε-threshold 0.75)
+  ε range: 3.687e-05 – 3.824e+00
+  Z_out (ToF @ min-ε): n=1058/1169  mean=1.0394 m  σ=7.19 mm
+
+  ** Approach 1 — Average Error **
+     GT distance:  1.0496 m
+     Valid dots:   1058 / 1169
+     Mean error:   -0.0102 m
+     Mean |error|: 0.0105 m
+     Std error:    0.0072 m
+     Min error:    -0.0360 m
+     Max error:    +0.0271 m
+AVG_ERR|1|1.0496|1058|1169|-0.010207|0.010467|0.007187|-0.035998|0.027094
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_1000mm_SL1_Pos9", "approach": 1, "n_valid": 1058, "n_total": 1169, "mean_z_m": 1.0393932142447435, "std_z_m": 0.00718672864108554, "gt_m": 1.0496, "mean_m": -0.010207, "abs_mean_m": 0.010467, "std_m": 0.007187, "min_m": -0.035998, "max_m": 0.027094}}
+
+============================================================
+  flat_1000mm_SL1_Pos9 · Approach 2
+============================================================
+
+Approach 2: 1169 trails, 1062 fused depths (0 SL/iToF conflicts > 20σ not fused)
+  SL (triangulated): n=1062/1169  mean=1.0435 m  σ=15.80 mm
+  iToF: n=1062/1169  mean=1.0389 m  σ=7.17 mm
+  Joint likelihood: n=1062/1169  mean=1.0433 m  σ=15.30 mm
+  mean predicted σ_SL: 4.57 mm
+  mean predicted σ_ToF: 21.48 mm
+  mean predicted σ_joint: 4.47 mm
+
+  ** Approach 2 — Average Error **
+     GT distance:  1.0496 m
+     Valid dots:   1062 / 1169
+     Mean error:   -0.0063 m
+     Mean |error|: 0.0110 m
+     Std error:    0.0153 m
+     Min error:    -0.1582 m
+     Max error:    +0.0881 m
+AVG_ERR|2|1.0496|1062|1169|-0.006323|0.011041|0.015295|-0.158206|0.088118
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_1000mm_SL1_Pos9", "approach": 2, "n_valid": 1062, "n_total": 1169, "mean_z_m": 1.0432774342193893, "std_z_m": 0.015295179810312679, "gt_m": 1.0496, "mean_m": -0.006323, "abs_mean_m": 0.011041, "std_m": 0.015295, "min_m": -0.158206, "max_m": 0.088118}}
+
+============================================================
+  flat_1000mm_SL1_Pos9 · Approach 3
+============================================================
+
+Approach 3: 1169 trails (6 without AB peaks, 96 without usable iToF, 5 too far from the local iToF bias; 107 invalid in total)
+  local iToF bias 1/z_ToF − 1/z_SL: median +0.000 1/m (5–95 %: +0.000 … +0.020)
+  Z_out (triangulated): n=1062/1169  mean=1.0435 m  σ=15.80 mm
+
+  ** Approach 3 — Average Error **
+     GT distance:  1.0496 m
+     Valid dots:   1062 / 1169
+     Mean error:   -0.0061 m
+     Mean |error|: 0.0113 m
+     Std error:    0.0158 m
+     Min error:    -0.1583 m
+     Max error:    +0.1017 m
+AVG_ERR|3|1.0496|1062|1169|-0.006059|0.011266|0.015801|-0.158281|0.101668
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_1000mm_SL1_Pos9", "approach": 3, "n_valid": 1062, "n_total": 1169, "mean_z_m": 1.0435412452683417, "std_z_m": 0.0158012953762317, "gt_m": 1.0496, "mean_m": -0.006059, "abs_mean_m": 0.011266, "std_m": 0.015801, "min_m": -0.158281, "max_m": 0.101668}}
+GUI_EVENT|{"type": "figures", "scene": "flat_1000mm_SL1_Pos9", "dir": "../Results/flatwall_6.11_v2/Coherent/flat_1000mm_SL1_Pos9/figures"}
+GUI_EVENT|{"type": "scene_start", "scene": "flat_1500mm_SL2_Pos0", "i": 3, "n": 6}
+
+######################################################################
+  [4/6] flat_1500mm_SL2_Pos0
+######################################################################
+
+RAW → PCD: /home/julian/Documents/Calibrations/6.11/Coherent_SL_2/ToF_RAW/Pos0_set0
+  RAW: 10 frame(s) from /home/julian/Documents/Calibrations/6.11/Coherent_SL_2/ToF_RAW/Pos0_set0   frequencies [100] MHz   mode dots
+  New min phase for unambiguity range 0.0
+  Reading h5py calib file
+  fMod = 100 MHz, unambiguity range R = 1.4990 m, k = 0..3
+  Dots: 1094/1169 valid, k = [1], 0 ambiguous, 0 corrected
+  Mean of 10 frame(s) → ../Results/flatwall_6.11_v2/Coherent/flat_1500mm_SL2_Pos0/tof/flat_1500mm_SL2_Pos0.pcd
+GUI_EVENT|{"type": "pcd", "scene": "flat_1500mm_SL2_Pos0", "path": "../Results/flatwall_6.11_v2/Coherent/flat_1500mm_SL2_Pos0/tof/flat_1500mm_SL2_Pos0.pcd", "label": "flat_1500mm_SL2_Pos0 \u00b7 ToF"}
+SL image: gray values of the ToF cloud (no EXR given)
+Trails: 1169 / 1318 dots calibrated (mode: y)
+
+============================================================
+  flat_1500mm_SL2_Pos0 · Approach 1
+============================================================
+
+Approach 1: scanned 1169 trails (54 invalidated by ε-threshold 0.75)
+  ε range: 5.334e-05 – 4.044e+00
+  Z_out (ToF @ min-ε): n=1115/1169  mean=1.5554 m  σ=4.89 mm
+
+  ** Approach 1 — Average Error **
+     GT distance:  1.5515 m
+     Valid dots:   1115 / 1169
+     Mean error:   +0.0039 m
+     Mean |error|: 0.0050 m
+     Std error:    0.0049 m
+     Min error:    -0.0188 m
+     Max error:    +0.0282 m
+AVG_ERR|1|1.5515|1115|1169|0.003926|0.004956|0.004886|-0.018774|0.028191
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_1500mm_SL2_Pos0", "approach": 1, "n_valid": 1115, "n_total": 1169, "mean_z_m": 1.5554259457144322, "std_z_m": 0.004885610157489727, "gt_m": 1.5515, "mean_m": 0.003926, "abs_mean_m": 0.004956, "std_m": 0.004886, "min_m": -0.018774, "max_m": 0.028191}}
+
+============================================================
+  flat_1500mm_SL2_Pos0 · Approach 2
+============================================================
+
+Approach 2: 1169 trails, 1099 fused depths (0 SL/iToF conflicts > 20σ not fused)
+  SL (triangulated): n=1099/1169  mean=1.5422 m  σ=27.05 mm
+  iToF: n=1099/1169  mean=1.5536 m  σ=3.98 mm
+  Joint likelihood: n=1099/1169  mean=1.5441 m  σ=23.64 mm
+  mean predicted σ_SL: 10.05 mm
+  mean predicted σ_ToF: 19.82 mm
+  mean predicted σ_joint: 8.66 mm
+
+  ** Approach 2 — Average Error **
+     GT distance:  1.5515 m
+     Valid dots:   1099 / 1169
+     Mean error:   -0.0074 m
+     Mean |error|: 0.0119 m
+     Std error:    0.0236 m
+     Min error:    -0.3398 m
+     Max error:    +0.1368 m
+AVG_ERR|2|1.5515|1099|1169|-0.007406|0.011946|0.023636|-0.339836|0.136814
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_1500mm_SL2_Pos0", "approach": 2, "n_valid": 1099, "n_total": 1169, "mean_z_m": 1.5440944729397876, "std_z_m": 0.02363574661356813, "gt_m": 1.5515, "mean_m": -0.007406, "abs_mean_m": 0.011946, "std_m": 0.023636, "min_m": -0.339836, "max_m": 0.136814}}
+
+============================================================
+  flat_1500mm_SL2_Pos0 · Approach 3
+============================================================
+
+Approach 3: 1169 trails (6 without AB peaks, 61 without usable iToF, 3 too far from the local iToF bias; 70 invalid in total)
+  local iToF bias 1/z_ToF − 1/z_SL: median -0.010 1/m (5–95 %: -0.010 … +0.000)
+  Z_out (triangulated): n=1099/1169  mean=1.5422 m  σ=27.05 mm
+
+  ** Approach 3 — Average Error **
+     GT distance:  1.5515 m
+     Valid dots:   1099 / 1169
+     Mean error:   -0.0093 m
+     Mean |error|: 0.0151 m
+     Std error:    0.0271 m
+     Min error:    -0.3400 m
+     Max error:    +0.2089 m
+AVG_ERR|3|1.5515|1099|1169|-0.009284|0.015123|0.027053|-0.339954|0.208931
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_1500mm_SL2_Pos0", "approach": 3, "n_valid": 1099, "n_total": 1169, "mean_z_m": 1.5422156538413587, "std_z_m": 0.02705263819391978, "gt_m": 1.5515, "mean_m": -0.009284, "abs_mean_m": 0.015123, "std_m": 0.027053, "min_m": -0.339954, "max_m": 0.208931}}
+GUI_EVENT|{"type": "figures", "scene": "flat_1500mm_SL2_Pos0", "dir": "../Results/flatwall_6.11_v2/Coherent/flat_1500mm_SL2_Pos0/figures"}
+GUI_EVENT|{"type": "scene_start", "scene": "flat_2000mm_SL2_Pos2", "i": 4, "n": 6}
+
+######################################################################
+  [5/6] flat_2000mm_SL2_Pos2
+######################################################################
+
+RAW → PCD: /home/julian/Documents/Calibrations/6.11/Coherent_SL_2/ToF_RAW/Pos2_set0
+  RAW: 10 frame(s) from /home/julian/Documents/Calibrations/6.11/Coherent_SL_2/ToF_RAW/Pos2_set0   frequencies [100] MHz   mode dots
+  New min phase for unambiguity range 0.0
+  Reading h5py calib file
+  fMod = 100 MHz, unambiguity range R = 1.4990 m, k = 0..3
+  Dots: 1093/1169 valid, k = [1], 1 ambiguous, 0 corrected
+  Mean of 10 frame(s) → ../Results/flatwall_6.11_v2/Coherent/flat_2000mm_SL2_Pos2/tof/flat_2000mm_SL2_Pos2.pcd
+GUI_EVENT|{"type": "pcd", "scene": "flat_2000mm_SL2_Pos2", "path": "../Results/flatwall_6.11_v2/Coherent/flat_2000mm_SL2_Pos2/tof/flat_2000mm_SL2_Pos2.pcd", "label": "flat_2000mm_SL2_Pos2 \u00b7 ToF"}
+SL image: gray values of the ToF cloud (no EXR given)
+Trails: 1169 / 1318 dots calibrated (mode: y)
+
+============================================================
+  flat_2000mm_SL2_Pos2 · Approach 1
+============================================================
+
+Approach 1: scanned 1169 trails (60 invalidated by ε-threshold 0.75)
+  ε range: 8.882e-06 – 3.857e+00
+  Z_out (ToF @ min-ε): n=1109/1169  mean=2.0477 m  σ=4.67 mm
+
+  ** Approach 1 — Average Error **
+     GT distance:  2.0507 m
+     Valid dots:   1109 / 1169
+     Mean error:   -0.0030 m
+     Mean |error|: 0.0045 m
+     Std error:    0.0047 m
+     Min error:    -0.0168 m
+     Max error:    +0.0154 m
+AVG_ERR|1|2.0507|1109|1169|-0.002997|0.004515|0.004666|-0.016820|0.015353
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_2000mm_SL2_Pos2", "approach": 1, "n_valid": 1109, "n_total": 1169, "mean_z_m": 2.0477026105752243, "std_z_m": 0.00466614744722701, "gt_m": 2.0507, "mean_m": -0.002997, "abs_mean_m": 0.004515, "std_m": 0.004666, "min_m": -0.01682, "max_m": 0.015353}}
+
+============================================================
+  flat_2000mm_SL2_Pos2 · Approach 2
+============================================================
+
+Approach 2: 1169 trails, 1100 fused depths (0 SL/iToF conflicts > 20σ not fused)
+  SL (triangulated): n=1100/1169  mean=2.0308 m  σ=51.95 mm
+  iToF: n=1100/1169  mean=2.0464 m  σ=4.23 mm
+  Joint likelihood: n=1100/1169  mean=2.0328 m  σ=42.73 mm
+  mean predicted σ_SL: 17.47 mm
+  mean predicted σ_ToF: 24.06 mm
+  mean predicted σ_joint: 11.55 mm
+
+  ** Approach 2 — Average Error **
+     GT distance:  2.0507 m
+     Valid dots:   1100 / 1169
+     Mean error:   -0.0179 m
+     Mean |error|: 0.0211 m
+     Std error:    0.0427 m
+     Min error:    -0.5457 m
+     Max error:    +0.0977 m
+AVG_ERR|2|2.0507|1100|1169|-0.017931|0.021073|0.042732|-0.545732|0.097698
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_2000mm_SL2_Pos2", "approach": 2, "n_valid": 1100, "n_total": 1169, "mean_z_m": 2.032768827434911, "std_z_m": 0.04273180005978511, "gt_m": 2.0507, "mean_m": -0.017931, "abs_mean_m": 0.021073, "std_m": 0.042732, "min_m": -0.545732, "max_m": 0.097698}}
+
+============================================================
+  flat_2000mm_SL2_Pos2 · Approach 3
+============================================================
+
+Approach 3: 1169 trails (6 without AB peaks, 60 without usable iToF, 3 too far from the local iToF bias; 69 invalid in total)
+  local iToF bias 1/z_ToF − 1/z_SL: median +0.000 1/m (5–95 %: -0.010 … +0.010)
+  Z_out (triangulated): n=1100/1169  mean=2.0308 m  σ=51.95 mm
+
+  ** Approach 3 — Average Error **
+     GT distance:  2.0507 m
+     Valid dots:   1100 / 1169
+     Mean error:   -0.0199 m
+     Mean |error|: 0.0330 m
+     Std error:    0.0520 m
+     Min error:    -0.5459 m
+     Max error:    +0.3761 m
+AVG_ERR|3|2.0507|1100|1169|-0.019924|0.032978|0.051951|-0.545911|0.376109
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_2000mm_SL2_Pos2", "approach": 3, "n_valid": 1100, "n_total": 1169, "mean_z_m": 2.0307759682413318, "std_z_m": 0.05195121034897099, "gt_m": 2.0507, "mean_m": -0.019924, "abs_mean_m": 0.032978, "std_m": 0.051951, "min_m": -0.545911, "max_m": 0.376109}}
+GUI_EVENT|{"type": "figures", "scene": "flat_2000mm_SL2_Pos2", "dir": "../Results/flatwall_6.11_v2/Coherent/flat_2000mm_SL2_Pos2/figures"}
+GUI_EVENT|{"type": "scene_start", "scene": "flat_3000mm_SL2_Pos3", "i": 5, "n": 6}
+
+######################################################################
+  [6/6] flat_3000mm_SL2_Pos3
+######################################################################
+
+RAW → PCD: /home/julian/Documents/Calibrations/6.11/Coherent_SL_2/ToF_RAW/Pos3_set0
+  RAW: 10 frame(s) from /home/julian/Documents/Calibrations/6.11/Coherent_SL_2/ToF_RAW/Pos3_set0   frequencies [100] MHz   mode dots
+  New min phase for unambiguity range 0.0
+  Reading h5py calib file
+  fMod = 100 MHz, unambiguity range R = 1.4990 m, k = 0..3
+  Dots: 1089/1169 valid, k = [2], 0 ambiguous, 0 corrected
+  Mean of 10 frame(s) → ../Results/flatwall_6.11_v2/Coherent/flat_3000mm_SL2_Pos3/tof/flat_3000mm_SL2_Pos3.pcd
+GUI_EVENT|{"type": "pcd", "scene": "flat_3000mm_SL2_Pos3", "path": "../Results/flatwall_6.11_v2/Coherent/flat_3000mm_SL2_Pos3/tof/flat_3000mm_SL2_Pos3.pcd", "label": "flat_3000mm_SL2_Pos3 \u00b7 ToF"}
+SL image: gray values of the ToF cloud (no EXR given)
+Trails: 1169 / 1318 dots calibrated (mode: y)
+
+============================================================
+  flat_3000mm_SL2_Pos3 · Approach 1
+============================================================
+
+Approach 1: scanned 1169 trails (100 invalidated by ε-threshold 0.75)
+  ε range: 6.008e-05 – 4.134e+00
+  Z_out (ToF @ min-ε): n=1069/1169  mean=3.0484 m  σ=5.75 mm
+
+  ** Approach 1 — Average Error **
+     GT distance:  3.0514 m
+     Valid dots:   1069 / 1169
+     Mean error:   -0.0030 m
+     Mean |error|: 0.0052 m
+     Std error:    0.0057 m
+     Min error:    -0.0203 m
+     Max error:    +0.0246 m
+AVG_ERR|1|3.0514|1069|1169|-0.003018|0.005242|0.005746|-0.020292|0.024590
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_3000mm_SL2_Pos3", "approach": 1, "n_valid": 1069, "n_total": 1169, "mean_z_m": 3.0483823900224114, "std_z_m": 0.005745651880685687, "gt_m": 3.0514, "mean_m": -0.003018, "abs_mean_m": 0.005242, "std_m": 0.005746, "min_m": -0.020292, "max_m": 0.02459}}
+
+============================================================
+  flat_3000mm_SL2_Pos3 · Approach 2
+============================================================
+
+Approach 2: 1169 trails, 1087 fused depths (0 SL/iToF conflicts > 20σ not fused)
+  SL (triangulated): n=1087/1169  mean=2.9962 m  σ=142.93 mm
+  iToF: n=1087/1169  mean=3.0461 m  σ=4.66 mm
+  Joint likelihood: n=1087/1169  mean=2.9974 m  σ=107.55 mm
+  mean predicted σ_SL: 38.11 mm
+  mean predicted σ_ToF: 59.23 mm
+  mean predicted σ_joint: 17.51 mm
+
+  ** Approach 2 — Average Error **
+     GT distance:  3.0514 m
+     Valid dots:   1087 / 1169
+     Mean error:   -0.0540 m
+     Mean |error|: 0.0567 m
+     Std error:    0.1075 m
+     Min error:    -1.0361 m
+     Max error:    +0.0386 m
+AVG_ERR|2|3.0514|1087|1169|-0.053963|0.056700|0.107546|-1.036068|0.038591
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_3000mm_SL2_Pos3", "approach": 2, "n_valid": 1087, "n_total": 1169, "mean_z_m": 2.9974373484841923, "std_z_m": 0.10754577665821767, "gt_m": 3.0514, "mean_m": -0.053963, "abs_mean_m": 0.0567, "std_m": 0.107546, "min_m": -1.036068, "max_m": 0.038591}}
+
+============================================================
+  flat_3000mm_SL2_Pos3 · Approach 3
+============================================================
+
+Approach 3: 1169 trails (6 without AB peaks, 76 without usable iToF, 0 too far from the local iToF bias; 82 invalid in total)
+  local iToF bias 1/z_ToF − 1/z_SL: median -0.010 1/m (5–95 %: -0.020 … +0.010)
+  Z_out (triangulated): n=1087/1169  mean=2.9962 m  σ=142.93 mm
+
+  ** Approach 3 — Average Error **
+     GT distance:  3.0514 m
+     Valid dots:   1087 / 1169
+     Mean error:   -0.0552 m
+     Mean |error|: 0.1074 m
+     Std error:    0.1429 m
+     Min error:    -1.0364 m
+     Max error:    +1.0679 m
+AVG_ERR|3|3.0514|1087|1169|-0.055181|0.107383|0.142934|-1.036369|1.067914
+GUI_EVENT|{"type": "result", "row": {"scene": "flat_3000mm_SL2_Pos3", "approach": 3, "n_valid": 1087, "n_total": 1169, "mean_z_m": 2.996218663264912, "std_z_m": 0.14293390261548877, "gt_m": 3.0514, "mean_m": -0.055181, "abs_mean_m": 0.107383, "std_m": 0.142934, "min_m": -1.036369, "max_m": 1.067914}}
+GUI_EVENT|{"type": "figures", "scene": "flat_3000mm_SL2_Pos3", "dir": "../Results/flatwall_6.11_v2/Coherent/flat_3000mm_SL2_Pos3/figures"}
+GUI_EVENT|{"type": "done"}

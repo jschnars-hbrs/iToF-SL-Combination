@@ -1,0 +1,58 @@
+{
+ "kind": "test",
+ "test": {
+  "calibration": "/home/julian/Documents/Github/iToF-SL-Combination/Calibrations/SchmersalRealCoherent_6.11_v2_paperlike_sor6-0.40_06.11/calibration.json",
+  "raw": {
+   "python": "/home/julian/Documents/Github/iToF-SL-Combination/.venv/bin/python",
+   "repo": "/home/julian/Documents/Calibrations/itofcameracalibration_new/itofcameracalibration",
+   "kalibration": "/home/julian/Documents/Calibrations/CalibData_Coherent_6.11.hdf5",
+   "mode": "auto"
+  },
+  "approaches": [
+   1,
+   2,
+   3
+  ],
+  "plots": true,
+  "export": false,
+  "tilt": {},
+  "scenes": [
+   {
+    "name": "flat_500mm_SL1_Pos2",
+    "raw": "/home/julian/Documents/Calibrations/6.11/Coherent_SL_1/ToF_RAW/Pos2_set0",
+    "gt": 0.5473,
+    "sl": null
+   },
+   {
+    "name": "flat_750mm_SL1_Pos6",
+    "raw": "/home/julian/Documents/Calibrations/6.11/Coherent_SL_1/ToF_RAW/Pos6_set0",
+    "gt": 0.7982,
+    "sl": null
+   },
+   {
+    "name": "flat_1000mm_SL1_Pos9",
+    "raw": "/home/julian/Documents/Calibrations/6.11/Coherent_SL_1/ToF_RAW/Pos9_set0",
+    "gt": 1.0496,
+    "sl": null
+   },
+   {
+    "name": "flat_1500mm_SL2_Pos0",
+    "raw": "/home/julian/Documents/Calibrations/6.11/Coherent_SL_2/ToF_RAW/Pos0_set0",
+    "gt": 1.5515,
+    "sl": null
+   },
+   {
+    "name": "flat_2000mm_SL2_Pos2",
+    "raw": "/home/julian/Documents/Calibrations/6.11/Coherent_SL_2/ToF_RAW/Pos2_set0",
+    "gt": 2.0507,
+    "sl": null
+   },
+   {
+    "name": "flat_3000mm_SL2_Pos3",
+    "raw": "/home/julian/Documents/Calibrations/6.11/Coherent_SL_2/ToF_RAW/Pos3_set0",
+    "gt": 3.0514,
+    "sl": null
+   }
+  ]
+ }
+}
